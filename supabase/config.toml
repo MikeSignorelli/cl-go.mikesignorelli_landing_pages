@@ -1,0 +1,16 @@
+project_id = "dnhvlilceqasarkovoht"
+
+[functions.create-checkout]
+verify_jwt = false
+
+[functions.notify-order]
+verify_jwt = false
+
+[functions.stripe-webhook]
+verify_jwt = false
+
+[functions.send-bonus-sample]
+verify_jwt = false
+
+[functions.submit-lead]
+verify_jwt = false

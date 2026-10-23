@@ -1,0 +1,191 @@
+@import url('https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap');
+@import url('https://use.typekit.net/your-kit-id.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 20% 97%;
+    --foreground: 120 11% 21%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 120 11% 21%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 120 11% 21%;
+
+    --primary: 120 10% 21%;
+    --primary-foreground: 40 20% 97%;
+
+    --secondary: 36 30% 51%;
+    --secondary-foreground: 40 20% 97%;
+
+    --muted: 40 15% 93%;
+    --muted-foreground: 120 8% 40%;
+
+    --accent: 36 30% 51%;
+    --accent-foreground: 40 20% 97%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 40 15% 85%;
+    --input: 40 15% 85%;
+    --ring: 120 11% 21%;
+
+    --radius: 0.25rem;
+
+    --gold: 36 30% 51%;
+    --gold-dark: 36 30% 41%;
+    --gold-light: 36 30% 65%;
+    --olive: 120 11% 21%;
+    --olive-dark: 120 11% 14%;
+    --olive-light: 120 8% 40%;
+    --cream: 40 30% 95%;
+    --charcoal: 120 11% 21%;
+    --warm-gray: 120 5% 50%;
+    --warm-white: 40 20% 97%;
+
+    --hero-overlay: linear-gradient(
+      to bottom,
+      hsla(120, 11%, 12%, 0.55) 0%,
+      hsla(120, 11%, 12%, 0.7) 50%,
+      hsla(120, 11%, 12%, 0.85) 100%
+    );
+
+    --font-heading: 'ff-din-paneuropean', 'DIN', 'Helvetica Neue', sans-serif;
+    --font-body: 'Lora', Georgia, serif;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body {
+    @apply overflow-x-hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer components {
+  .section-padding {
+    @apply px-4 py-14 sm:px-6 sm:py-20 md:px-12 lg:px-24 lg:py-28;
+  }
+
+  .heading-display {
+    font-family: var(--font-heading);
+    @apply text-3xl sm:text-4xl md:text-5xl lg:text-[3rem] font-bold tracking-tight leading-tight break-words [hyphens:auto];
+  }
+
+  .heading-section {
+    font-family: var(--font-heading);
+    @apply text-3xl md:text-4xl font-bold tracking-tight;
+  }
+
+  .subheading {
+    font-family: var(--font-body);
+    @apply text-sm md:text-base font-semibold uppercase tracking-[0.2em];
+    color: hsl(var(--gold));
+  }
+
+  .body-text {
+    font-family: var(--font-body);
+    @apply text-base md:text-lg leading-relaxed;
+    color: hsl(var(--warm-gray));
+  }
+
+  .btn-cta {
+    font-family: var(--font-heading);
+    @apply inline-flex items-center justify-center text-center rounded-lg bg-secondary text-secondary-foreground font-bold px-5 py-3 sm:px-8 sm:py-4 text-base sm:text-lg tracking-wide shadow-lg transition-all duration-200 max-w-full whitespace-normal leading-snug;
+  }
+  .btn-cta:hover {
+    @apply brightness-110 scale-[1.03] shadow-xl;
+  }
+  .btn-cta:active {
+    @apply scale-[0.98];
+  }
+}
+
+/* Accessibility utility classes */
+.a11y-btn {
+  @apply flex items-center gap-2 rounded-sm border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors;
+  font-family: var(--font-body);
+}
+.a11y-btn:hover {
+  @apply bg-muted;
+}
+.a11y-btn:disabled {
+  @apply opacity-40 cursor-not-allowed;
+}
+.a11y-btn-active {
+  @apply border-secondary bg-secondary/10;
+}
+.a11y-btn:focus-visible {
+  @apply outline-none ring-2 ring-secondary ring-offset-2;
+}
+
+/* High contrast mode */
+.a11y-high-contrast {
+  filter: contrast(1.4);
+}
+
+/* Highlight links mode */
+.a11y-highlight-links a {
+  outline: 2px solid hsl(var(--secondary)) !important;
+  outline-offset: 2px;
+}
+
+/* Pause animations mode */
+.a11y-pause-animations *,
+.a11y-pause-animations *::before,
+.a11y-pause-animations *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.3) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.3);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.5);
+}
