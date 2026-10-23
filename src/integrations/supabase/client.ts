@@ -3,8 +3,14 @@ import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 import { brokeredPreviewStorage } from './previewAuthStorage';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// createClient() throws synchronously if either value is empty, and this
+// module is in the eagerly-bundled main chunk (pulled in via submitLead.ts),
+// so a blank env var here blanks every route, not just the pages that use
+// this client. Falling back to a syntactically-valid placeholder keeps
+// construction from throwing; any real call still fails at the call site,
+// where callers already catch the error.
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'placeholder-key';
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
