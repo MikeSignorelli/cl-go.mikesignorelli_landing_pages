@@ -33,7 +33,13 @@ Deno.serve(async (req) => {
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-11-20.acacia" });
 
-    const origin = req.headers.get("origin") || "https://go.mikesignorelli.com";
+    // Only ever send a payer back to a site we own. The Origin header is
+    // attacker-controlled, so an unchecked value here would let someone craft a
+    // session that returns the customer to their own page after paying.
+    const SITE_ORIGIN = "https://cl-go-mikesignorelli.vercel.app";
+    const ALLOWED_ORIGINS = new Set([SITE_ORIGIN]);
+    const requested = req.headers.get("origin");
+    const origin = requested && ALLOWED_ORIGINS.has(requested) ? requested : SITE_ORIGIN;
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
