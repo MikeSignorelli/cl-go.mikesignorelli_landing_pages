@@ -1,4 +1,7 @@
-project_id = "dnhvlilceqasarkovoht"
+# The original Lovable-managed project (dnhvlilceqasarkovoht) is no longer
+# accessible to anyone on this team, so these functions now live in the
+# go.mikesignorelli.com project, which also hosts submit-lead.
+project_id = "gprrntuvxyzyjbwgqwce"
 
 [functions.create-checkout]
 verify_jwt = false
