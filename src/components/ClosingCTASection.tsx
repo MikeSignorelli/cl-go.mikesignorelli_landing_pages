@@ -28,7 +28,7 @@ const ClosingCTASection = () => {
       // private-mode or storage disabled - thank-you page will just send blanks
     }
     try {
-      await sendToZapier("greece-turkey-tour", "Lead", fields);
+      await sendToZapier("greece-turkey-tour", "Lead", fields, "greece");
     } finally {
       navigate("/greece-turkey-tour-thank-you");
     }

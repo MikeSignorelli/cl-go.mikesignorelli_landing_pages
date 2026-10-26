@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { usePSAQuiz, type ChurchSize } from "@/context/PSAQuizContext";
 import { collectFormFields } from "@/lib/collectFormFields";
 import { persistContact } from "@/lib/submitLead";
-import { sendToZapier, ZAPIER_WEBHOOK_URL_PSA } from "@/lib/sendToZapier";
+import { sendToZapier } from "@/lib/sendToZapier";
 
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,7 @@ const PSAEmailCapture = () => {
 
     const fields = collectFormFields(form);
     persistContact("pastor-systems-audit", fields);
-    sendToZapier("pastor-systems-audit", "Lead", fields, ZAPIER_WEBHOOK_URL_PSA).catch((err) => {
+    sendToZapier("pastor-systems-audit", "Lead", fields, "psa").catch((err) => {
       console.error("[Lead] Webhook error:", err);
     });
 

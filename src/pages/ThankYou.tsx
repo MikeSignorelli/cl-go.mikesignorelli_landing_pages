@@ -48,10 +48,15 @@ const ThankYou = () => {
       // no persisted contact - send blanks
     }
 
-    sendToZapier("greece-turkey-tour-thank-you", "Thank-You", {
-      email: contact.email ?? "",
-      first_name: contact.first_name ?? "",
-    });
+    sendToZapier(
+      "greece-turkey-tour-thank-you",
+      "Thank-You",
+      {
+        email: contact.email ?? "",
+        first_name: contact.first_name ?? "",
+      },
+      "greece",
+    );
   }, []);
 
   return (

@@ -13,11 +13,15 @@ const corsHeaders = {
 // one that knew only "fivefold" (deployed, no database writes) and one that knew
 // only "all" (had the `leads` insert, never deployed). Dropping either key
 // silently 400s a form that is live today.
-//   - "fivefold": the five-fold quiz, via sendToZapierViaEdge()
-//   - "all":      every other form, via submitLead()
+//   - "greece":   the Greece/Turkey tour forms and its thank-you page
+//   - "psa":      the Pastor Systems Audit quiz and its thank-you page
+//   - "fivefold": the five-fold quiz
+//   - "all":      the Inherit Your Freedom checkout and thank-you, via submitLead()
 const WEBHOOK_ENV: Record<string, string> = {
   all: "ZAPIER_ALL_LEADS_WEBHOOK_URL",
   fivefold: "ZAPIER_FIVEFOLD_WEBHOOK_URL",
+  greece: "ZAPIER_GREECE_WEBHOOK_URL",
+  psa: "ZAPIER_PSA_WEBHOOK_URL",
 };
 
 // Every `leads` column except `amount` (numeric, handled separately) and the

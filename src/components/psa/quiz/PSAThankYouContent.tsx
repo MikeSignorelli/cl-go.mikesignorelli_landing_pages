@@ -49,10 +49,10 @@ const PSAThankYouContent = () => {
     const key = "pastor-systems-audit-thank-you";
     (async () => {
       const { readPersistedContact, hasSentThankYou, markThankYouSent } = await import("@/lib/submitLead");
-      const { sendToZapier, ZAPIER_WEBHOOK_URL_PSA } = await import("@/lib/sendToZapier");
+      const { sendToZapier } = await import("@/lib/sendToZapier");
       if (hasSentThankYou(key)) return;
       markThankYouSent(key);
-      await sendToZapier(key, "Thank-You", readPersistedContact("pastor-systems-audit"), ZAPIER_WEBHOOK_URL_PSA);
+      await sendToZapier(key, "Thank-You", readPersistedContact("pastor-systems-audit"), "psa");
     })();
   }, []);
 

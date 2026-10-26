@@ -1,12 +1,11 @@
 export type FormType = "Lead" | "Checkout" | "Thank-You";
 
-const ZAPIER_WEBHOOK_URL = import.meta.env.VITE_ZAPIER_WEBHOOK_URL as string | undefined;
-export const ZAPIER_WEBHOOK_URL_FIVEFOLD = import.meta.env.VITE_ZAPIER_WEBHOOK_URL_FIVEFOLD as
-  | string
-  | undefined;
-export const ZAPIER_WEBHOOK_URL_PSA = import.meta.env.VITE_ZAPIER_WEBHOOK_URL_PSA as
-  | string
-  | undefined;
+/**
+ * Destination for a submission. Each key maps to a server-side secret in the
+ * submit-lead edge function; the real Zapier URL never reaches the browser.
+ * Adding a key here means adding it to WEBHOOK_ENV in that function too.
+ */
+export type WebhookKey = "greece" | "psa" | "fivefold" | "all";
 
 // Server-side proxy: posts go to our own Supabase edge function instead of
 // directly to hooks.zapier.com, so ad blockers that target Zapier's domain
@@ -96,55 +95,26 @@ function buildPayload(pageName: string, formType: FormType, fields: Record<strin
 }
 
 /**
- * Posts a lead/thank-you event directly to the Zapier webhook in
- * VITE_ZAPIER_WEBHOOK_URL. Never throws - a network/webhook failure must
- * never block the caller's redirect.
+ * Posts a lead/thank-you event through our own Supabase edge function, which
+ * holds the real Zapier webhook URL server-side, saves the lead to the `leads`
+ * table and then forwards it.
+ *
+ * Every submission goes through here. The request never touches
+ * hooks.zapier.com from the browser, so ad blockers that target Zapier's
+ * domain can't silently drop a lead, and no webhook URL ships in the bundle.
+ * Never throws - a failure must not block the caller's redirect.
  */
 export async function sendToZapier(
   pageName: string,
   formType: FormType,
   fields: Record<string, unknown> = {},
-  webhookUrl: string | undefined = ZAPIER_WEBHOOK_URL,
+  webhookKey: WebhookKey,
 ): Promise<void> {
   const payload = buildPayload(pageName, formType, fields);
-  console.log("Zapier payload", payload);
-
-  if (!webhookUrl) {
-    console.error("[sendToZapier] no webhook URL configured for this call");
-    return;
-  }
-
-  try {
-    await fetch(webhookUrl, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify(payload),
-    });
-  } catch (err) {
-    console.error("[sendToZapier] failed:", err);
-  }
-}
-
-/**
- * Posts a lead/thank-you event through our own Supabase edge function, which
- * holds the real Zapier webhook URL server-side and forwards the request.
- * Unlike `sendToZapier`, the request never touches hooks.zapier.com from the
- * browser, so ad blockers that target Zapier's domain can't drop it.
- * `webhookKey` must match one of the keys the edge function's WEBHOOK_ENV
- * map recognizes (e.g. "fivefold"). Never throws.
- */
-export async function sendToZapierViaEdge(
-  pageName: string,
-  formType: FormType,
-  fields: Record<string, unknown> = {},
-  webhookKey: string,
-): Promise<void> {
-  const payload = buildPayload(pageName, formType, fields);
-  console.log("Zapier payload (via edge)", payload);
+  console.debug("[sendToZapier]", pageName, formType, webhookKey);
 
   if (!LEADS_SUPABASE_URL || !LEADS_SUPABASE_PUBLISHABLE_KEY) {
-    console.error("[sendToZapierViaEdge] missing VITE_LEADS_SUPABASE_URL/VITE_LEADS_SUPABASE_PUBLISHABLE_KEY");
+    console.error("[sendToZapier] missing VITE_LEADS_SUPABASE_URL/VITE_LEADS_SUPABASE_PUBLISHABLE_KEY");
     return;
   }
 
@@ -159,6 +129,6 @@ export async function sendToZapierViaEdge(
       body: JSON.stringify({ webhook: webhookKey, payload }),
     });
   } catch (err) {
-    console.error("[sendToZapierViaEdge] failed:", err);
+    console.error("[sendToZapier] failed:", err);
   }
 }

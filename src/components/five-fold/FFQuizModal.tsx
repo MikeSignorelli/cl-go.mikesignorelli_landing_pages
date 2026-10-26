@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft } from "lucide-react";
 import { generateCertificatePDF, downloadPDF } from "@/lib/generateCertificate";
-import { sendToZapierViaEdge } from "@/lib/sendToZapier";
+import { sendToZapier } from "@/lib/sendToZapier";
 import { persistContact } from "@/lib/submitLead";
 
 interface FFQuizModalProps {
@@ -422,7 +422,7 @@ const FFQuizModal = ({ open, onOpenChange }: FFQuizModalProps) => {
       };
 
       persistContact("five-fold-gift", fields);
-      sendToZapierViaEdge("five-fold-gift", "Lead", fields, "fivefold").catch((err) =>
+      sendToZapier("five-fold-gift", "Lead", fields, "fivefold").catch((err) =>
         console.error("[Lead] Webhook error:", err),
       );
 
