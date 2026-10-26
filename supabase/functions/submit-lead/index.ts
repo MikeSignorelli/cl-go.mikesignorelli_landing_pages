@@ -5,8 +5,19 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// One secret per destination sheet/tab, kept server-side so the real Zapier URL
+// never reaches the public bundle - an ad blocker that drops hooks.zapier.com
+// can't drop a request to our own .supabase.co domain.
+//
+// BOTH keys must stay here. This function was previously two diverging copies:
+// one that knew only "fivefold" (deployed, no database writes) and one that knew
+// only "all" (had the `leads` insert, never deployed). Dropping either key
+// silently 400s a form that is live today.
+//   - "fivefold": the five-fold quiz, via sendToZapierViaEdge()
+//   - "all":      every other form, via submitLead()
 const WEBHOOK_ENV: Record<string, string> = {
   all: "ZAPIER_ALL_LEADS_WEBHOOK_URL",
+  fivefold: "ZAPIER_FIVEFOLD_WEBHOOK_URL",
 };
 
 // Every `leads` column except `amount` (numeric, handled separately) and the
@@ -47,14 +58,10 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Missing secret is NOT fatal: the lead is still worth saving, and failing
+    // here would lose it entirely. Recorded on the row instead.
     const url = Deno.env.get(envName);
-    if (!url) {
-      console.error("submit-lead: missing env", envName);
-      return new Response(JSON.stringify({ error: "An internal error occurred" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    if (!url) console.error("submit-lead: missing env", envName);
 
     // Validate + cap payload size; only forward whitelisted primitive fields.
     const payload = isPlainObject(body.payload) ? body.payload : {};
@@ -95,38 +102,44 @@ Deno.serve(async (req) => {
 
     // ---- Forward to Zapier. A Zapier failure never fails the request - the lead is
     // already saved above, and the caller must not be blocked from its thank-you redirect.
-    let emailStatus = "Sent";
+    let status: "sent" | "failed" | "skipped" = "sent";
     let zapierError: string | null = null;
-    try {
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(safePayload),
-      });
-      if (!r.ok) {
-        const txt = await r.text();
-        console.error("submit-lead: zapier non-ok", r.status, txt);
-        emailStatus = "Failed";
-        zapierError = `HTTP ${r.status}: ${txt.slice(0, 500)}`;
+
+    if (!url) {
+      status = "skipped";
+      zapierError = `${envName} not configured`;
+    } else {
+      try {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(safePayload),
+        });
+        if (!r.ok) {
+          const txt = await r.text();
+          console.error("submit-lead: zapier non-ok", r.status, txt);
+          status = "failed";
+          zapierError = `HTTP ${r.status}: ${txt.slice(0, 500)}`;
+        }
+      } catch (err) {
+        console.error("submit-lead: zapier fetch error", err);
+        status = "failed";
+        zapierError = err instanceof Error ? err.message : String(err);
       }
-    } catch (err) {
-      console.error("submit-lead: zapier fetch error", err);
-      emailStatus = "Failed";
-      zapierError = err instanceof Error ? err.message : String(err);
     }
 
     if (leadId && admin) {
       const { error: updateErr } = await admin
         .from("leads")
-        .update({ zapier_status: emailStatus === "Sent" ? "sent" : "failed", zapier_error: zapierError })
+        .update({ zapier_status: status, zapier_error: zapierError })
         .eq("id", leadId);
       if (updateErr) console.error("submit-lead: status update failed", updateErr);
     }
 
-    return new Response(JSON.stringify({ success: emailStatus === "Sent", email_status: emailStatus, lead_id: leadId }), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ success: status === "sent", status, webhook, lead_id: leadId, error: zapierError }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
   } catch (err) {
     console.error("submit-lead error", err);
     return new Response(JSON.stringify({ error: "An internal error occurred" }), {
