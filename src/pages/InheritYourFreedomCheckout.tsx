@@ -82,6 +82,10 @@ const InheritYourFreedomCheckout = () => {
     const checkoutFields = {
       ...collectFormFields(formEl),
       product_package: "Inherit Your Freedom",
+      // The quantity stepper is React state, not a form input, so
+      // collectFormFields cannot see it - pass it explicitly or the
+      // Quantity column on the order sheet is always blank.
+      quantity: String(qty),
       amount: total.toFixed(2),
       currency: "USD",
       payment_status: "initiated",
