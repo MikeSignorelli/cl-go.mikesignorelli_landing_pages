@@ -51,6 +51,44 @@ Deno.serve(async (req) => {
 
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
+  // Fire-and-forget: log this status change to the "inherit your freedom
+  // order to google sheet" Zap. Field names must match that Zap's Google
+  // Sheets step mapping (first_name, email_address, zip_code, etc).
+  const zapierOrderUrl = Deno.env.get("ZAPIER_ORDER_WEBHOOK_URL");
+  function notifyZapierOrder(session: Stripe.Checkout.Session, paymentStatus: string) {
+    if (!zapierOrderUrl) {
+      console.warn("stripe-webhook: ZAPIER_ORDER_WEBHOOK_URL not configured, order not sent to Zapier");
+      return;
+    }
+    const m = session.metadata ?? {};
+    const purchaseDate = session.created ? new Date(session.created * 1000) : new Date();
+    fetch(zapierOrderUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order_id: session.id,
+        first_name: m.first_name ?? "",
+        last_name: m.last_name ?? "",
+        email_address: session.customer_email ?? session.customer_details?.email ?? "",
+        phone_number: m.customer_phone ?? session.customer_details?.phone ?? "",
+        address: m.shipping_street ?? "",
+        city: m.shipping_city ?? "",
+        state: m.shipping_state ?? "",
+        zip_code: m.shipping_zip ?? "",
+        product: "Inherit Your Freedom",
+        quantity: String(m.quantity ?? "1"),
+        payment_status: paymentStatus,
+        amount_total: session.amount_total != null ? (session.amount_total / 100).toFixed(2) : "",
+        currency: (session.currency ?? "usd").toUpperCase(),
+        order_date: purchaseDate.toISOString(),
+        purchase_date: purchaseDate.toLocaleString("en-US", {
+          year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+        }),
+        email_status: "Not Sent",
+      }),
+    }).catch((err) => console.error("stripe-webhook: zapier order webhook failed", err));
+  }
+
   try {
     switch (event.type) {
       case "checkout.session.completed":
@@ -77,6 +115,7 @@ Deno.serve(async (req) => {
             { onConflict: "stripe_session_id" },
           );
         if (error) console.error("stripe-webhook: upsert (paid) failed", error);
+        notifyZapierOrder(session, "paid");
         break;
       }
 
@@ -88,6 +127,7 @@ Deno.serve(async (req) => {
           .update({ status: "failed", updated_at: new Date().toISOString() })
           .eq("stripe_session_id", session.id);
         if (error) console.error("stripe-webhook: update (failed) failed", error);
+        notifyZapierOrder(session, "failed");
         break;
       }
 

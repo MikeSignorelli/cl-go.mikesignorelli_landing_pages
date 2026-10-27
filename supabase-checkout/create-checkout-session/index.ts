@@ -143,6 +143,41 @@ Deno.serve(async (req) => {
       console.warn("create-checkout-session: SUPABASE_URL/SERVICE_ROLE_KEY missing, order not recorded");
     }
 
+    // ---- Fire-and-forget: log the pending order to the "inherit your freedom
+    // order to google sheet" Zap. Field names must match that Zap's Google
+    // Sheets step mapping (first_name, email_address, zip_code, etc).
+    const zapierOrderUrl = Deno.env.get("ZAPIER_ORDER_WEBHOOK_URL");
+    if (zapierOrderUrl) {
+      const purchaseDate = new Date();
+      fetch(zapierOrderUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          order_id: session.id,
+          first_name: shipping.firstName ?? "",
+          last_name: shipping.lastName ?? "",
+          email_address: typeof email === "string" ? email : "",
+          phone_number: shipping.phone ?? "",
+          address: shipping.street ?? "",
+          city: shipping.city ?? "",
+          state: shipping.state ?? "",
+          zip_code: shipping.zip ?? "",
+          product: "Inherit Your Freedom",
+          quantity: String(quantity),
+          payment_status: "pending",
+          amount_total: session.amount_total != null ? (session.amount_total / 100).toFixed(2) : "",
+          currency: (session.currency ?? "usd").toUpperCase(),
+          order_date: purchaseDate.toISOString(),
+          purchase_date: purchaseDate.toLocaleString("en-US", {
+            year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+          }),
+          email_status: "Pending",
+        }),
+      }).catch((err) => console.error("create-checkout-session: zapier order webhook failed", err));
+    } else {
+      console.warn("create-checkout-session: ZAPIER_ORDER_WEBHOOK_URL not configured, order not sent to Zapier");
+    }
+
     return json({ url: session.url });
   } catch (err) {
     console.error("create-checkout-session error", err);

@@ -61,6 +61,14 @@ is meant to be cut over.
   under a test secret key, and vice versa).
 - `SITE_URL` — e.g. `https://cl-go-mikesignorelli.vercel.app` (used to build
   Stripe's `success_url`/`cancel_url`)
+- `ZAPIER_ORDER_WEBHOOK_URL` — the Catch Hook URL for the "inherit your
+  freedom order to google sheet" Zap (Webhooks by Zapier -> Google Sheets).
+  `create-checkout-session` posts a `payment_status: "pending"` row here right
+  after creating the Stripe session; `stripe-webhook-orders` posts a second
+  `"paid"` or `"failed"` row once Stripe confirms the result. Field names in
+  the payload (`first_name`, `email_address`, `zip_code`, `purchase_date`,
+  `email_status`, etc) must match that Zap's Google Sheets step mapping
+  exactly, since the Catch Hook step has no schema of its own.
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected by Supabase
 for every edge function — no need to set them manually.
