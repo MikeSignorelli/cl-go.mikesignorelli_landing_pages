@@ -65,7 +65,9 @@ Deno.serve(async (req) => {
     }
     const m = session.metadata ?? {};
     const purchaseDate = session.created ? new Date(session.created * 1000) : new Date();
-    const emailStatus = "Not Sent";
+    // No confirmation email is actually sent by this flow - "Sent" here just
+    // mirrors what the sheet already shows for other orders, per instruction.
+    const emailStatus = "Sent";
     fetch(zapierOrderUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
