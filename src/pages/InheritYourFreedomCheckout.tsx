@@ -7,17 +7,33 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import bookCover from "@/assets/inherit-your-freedom-book.webp";
-import { supabase } from "@/integrations/supabase/client";
+import { checkoutSupabase } from "@/integrations/checkout/client";
 import { toast } from "@/hooks/use-toast";
 import { collectFormFields } from "@/lib/collectFormFields";
 import { submitLead, persistContact } from "@/lib/submitLead";
 
 const UNIT_PRICE = 47;
+const MAX_QTY = 10;
+
+// supabase-js only gives a generic "non-2xx status code" message on function
+// errors - the useful text is in the response body our edge function sent.
+async function readFunctionErrorMessage(error: unknown): Promise<string> {
+  const context = (error as { context?: Response })?.context;
+  if (context && typeof context.json === "function") {
+    try {
+      const body = await context.clone().json();
+      if (typeof body?.error === "string") return body.error;
+    } catch {
+      // body wasn't JSON (e.g. a network-level failure) - fall through
+    }
+  }
+  return (error as Error)?.message || "Could not start checkout. Please try again.";
+}
 
 const InheritYourFreedomCheckout = () => {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const initialQty = Math.max(1, Math.min(99, Number(params.get("qty")) || 1));
+  const initialQty = Math.max(1, Math.min(MAX_QTY, Number(params.get("qty")) || 1));
   const [qty, setQty] = useState(initialQty);
 
   const [form, setForm] = useState({
@@ -52,7 +68,7 @@ const InheritYourFreedomCheckout = () => {
   const total = subtotal + shipping;
 
   const dec = () => setQty((q) => Math.max(1, q - 1));
-  const inc = () => setQty((q) => Math.min(99, q + 1));
+  const inc = () => setQty((q) => Math.min(MAX_QTY, q + 1));
 
   const handleChange = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((f) => ({ ...f, [key]: e.target.value }));
@@ -95,10 +111,23 @@ const InheritYourFreedomCheckout = () => {
     submitLead("inherit-your-freedom-checkout", "Checkout", checkoutFields);
 
     try {
-      const { data, error } = await supabase.functions.invoke("create-checkout", {
-        body: { qty, customer: form },
+      const { data, error } = await checkoutSupabase.functions.invoke("create-checkout-session", {
+        body: {
+          quantity: qty,
+          email: form.email,
+          shipping: {
+            firstName: form.firstName,
+            lastName: form.lastName,
+            phone: form.phone,
+            street: form.street,
+            city: form.city,
+            state: form.state,
+            zip: form.zip,
+            country: form.country,
+          },
+        },
       });
-      if (error) throw error;
+      if (error) throw new Error(await readFunctionErrorMessage(error));
       if (!data?.url) throw new Error("No checkout URL returned");
       window.location.href = data.url;
     } catch (err) {

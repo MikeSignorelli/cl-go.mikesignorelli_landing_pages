@@ -21,6 +21,8 @@ import InheritYourFreedom from "./pages/InheritYourFreedom.tsx";
 import InheritYourFreedomShop from "./pages/InheritYourFreedomShop.tsx";
 import InheritYourFreedomCheckout from "./pages/InheritYourFreedomCheckout.tsx";
 import InheritYourFreedomThankYou from "./pages/InheritYourFreedomThankYou.tsx";
+import InheritYourFreedomSuccess from "./pages/InheritYourFreedomSuccess.tsx";
+import InheritYourFreedomCancel from "./pages/InheritYourFreedomCancel.tsx";
 import ChurchSystemsStarterKit from "./pages/ChurchSystemsStarterKit.tsx";
 import ScrollToTop from "./components/ScrollToTop.tsx";
 import PageMeta from "./components/PageMeta.tsx";
@@ -54,6 +56,8 @@ const App = () => (
           <Route path="/inherit-your-freedom/shop" element={<InheritYourFreedomShop />} />
           <Route path="/inherit-your-freedom/checkout" element={<InheritYourFreedomCheckout />} />
           <Route path="/inherit-your-freedom/thank-you" element={<InheritYourFreedomThankYou />} />
+          <Route path="/inherit-your-freedom/success" element={<InheritYourFreedomSuccess />} />
+          <Route path="/inherit-your-freedom/cancel" element={<InheritYourFreedomCancel />} />
           <Route path="/church-systems-starter-kit" element={<ChurchSystemsStarterKit />} />
           <Route path="/admin" element={<AdminLogin />} />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
