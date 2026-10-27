@@ -51,17 +51,21 @@ Deno.serve(async (req) => {
 
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
-  // Fire-and-forget: log this status change to the "inherit your freedom
-  // order to google sheet" Zap. Field names must match that Zap's Google
-  // Sheets step mapping (first_name, email_address, zip_code, etc).
+  // Fire-and-forget: log a PAID order to the "inherit your freedom order to
+  // google sheet" Zap. Only called for confirmed payments - no pending/failed
+  // rows. Field names must match that Zap's Google Sheets step mapping
+  // (first_name, email_address, zip_code, etc). email_status is sent under
+  // three key spellings since the Zap's Catch Hook step matches on the exact
+  // key it first saw and we don't know which casing it was set up with.
   const zapierOrderUrl = Deno.env.get("ZAPIER_ORDER_WEBHOOK_URL");
-  function notifyZapierOrder(session: Stripe.Checkout.Session, paymentStatus: string) {
+  function notifyZapierOrderPaid(session: Stripe.Checkout.Session) {
     if (!zapierOrderUrl) {
       console.warn("stripe-webhook: ZAPIER_ORDER_WEBHOOK_URL not configured, order not sent to Zapier");
       return;
     }
     const m = session.metadata ?? {};
     const purchaseDate = session.created ? new Date(session.created * 1000) : new Date();
+    const emailStatus = "Not Sent";
     fetch(zapierOrderUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -77,14 +81,16 @@ Deno.serve(async (req) => {
         zip_code: m.shipping_zip ?? "",
         product: "Inherit Your Freedom",
         quantity: String(m.quantity ?? "1"),
-        payment_status: paymentStatus,
+        payment_status: "paid",
         amount_total: session.amount_total != null ? (session.amount_total / 100).toFixed(2) : "",
         currency: (session.currency ?? "usd").toUpperCase(),
         order_date: purchaseDate.toISOString(),
         purchase_date: purchaseDate.toLocaleString("en-US", {
           year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", timeZoneName: "short",
         }),
-        email_status: "Not Sent",
+        email_status: emailStatus,
+        emailStatus: emailStatus,
+        "Email Status": emailStatus,
       }),
     }).catch((err) => console.error("stripe-webhook: zapier order webhook failed", err));
   }
@@ -115,7 +121,7 @@ Deno.serve(async (req) => {
             { onConflict: "stripe_session_id" },
           );
         if (error) console.error("stripe-webhook: upsert (paid) failed", error);
-        notifyZapierOrder(session, "paid");
+        notifyZapierOrderPaid(session);
         break;
       }
 
@@ -127,7 +133,7 @@ Deno.serve(async (req) => {
           .update({ status: "failed", updated_at: new Date().toISOString() })
           .eq("stripe_session_id", session.id);
         if (error) console.error("stripe-webhook: update (failed) failed", error);
-        notifyZapierOrder(session, "failed");
+        // Not sent to Zapier/Google Sheet - that sheet only tracks paid orders.
         break;
       }
 
