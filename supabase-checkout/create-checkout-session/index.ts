@@ -12,7 +12,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const DEFAULT_PRICE_ID = "price_1TQsxLEJYM9YrDv1OPjC1nqg";
 const DEFAULT_SITE_URL = "https://cl-go-mikesignorelli.vercel.app";
 // Must match the flat shipping fee shown on the checkout page (src/pages/
 // InheritYourFreedomCheckout.tsx: `const shipping = 6.99;`) - that figure is
@@ -57,6 +56,21 @@ Deno.serve(async (req) => {
       return json({ error: "Payment processing is not configured" }, 500);
     }
 
+    // ---- Live-mode guard: a test key must never be used once the deployment
+    // is declared live, or a misconfigured secret would silently fall back to
+    // test-mode charges. STRIPE_MODE is a manual flag set alongside the secrets.
+    const stripeMode = Deno.env.get("STRIPE_MODE");
+    if (stripeMode === "live" && stripeKey.startsWith("sk_test_")) {
+      console.error("create-checkout-session: test key in live mode");
+      return json({ error: "Stripe is misconfigured: test key in live mode" }, 500);
+    }
+
+    const priceId = Deno.env.get("STRIPE_PRICE_ID");
+    if (!priceId) {
+      console.error("create-checkout-session: STRIPE_PRICE_ID not configured");
+      return json({ error: "Payment processing is not configured" }, 500);
+    }
+
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {
       return json({ error: "Invalid request body" }, 400);
@@ -88,10 +102,22 @@ Deno.serve(async (req) => {
       }
     }
 
-    const priceId = Deno.env.get("STRIPE_PRICE_ID") || DEFAULT_PRICE_ID;
     const siteUrl = Deno.env.get("SITE_URL") || DEFAULT_SITE_URL;
 
     const stripe = new Stripe(stripeKey, { apiVersion: "2024-11-20.acacia" });
+
+    // ---- Verify the configured price actually exists, is active, and (in
+    // live mode) is itself a live-mode price - test and live prices are
+    // separate objects in Stripe even when the ID format looks identical.
+    const price = await stripe.prices.retrieve(priceId);
+    if (!price.active) {
+      console.error("create-checkout-session: configured price is not active", priceId);
+      return json({ error: "Payment processing is not configured" }, 500);
+    }
+    if (stripeMode === "live" && !price.livemode) {
+      console.error("create-checkout-session: configured price is not a live-mode price", priceId);
+      return json({ error: "Stripe is misconfigured: test price in live mode" }, 500);
+    }
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -147,6 +173,7 @@ Deno.serve(async (req) => {
         shipping_zip: shipping.zip,
         shipping_country: shipping.country,
         status: "pending",
+        livemode: session.livemode,
       });
       if (insertErr) {
         // Don't block the redirect on a logging failure - the webhook will

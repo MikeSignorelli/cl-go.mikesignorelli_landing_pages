@@ -253,6 +253,18 @@ Deno.serve(async (req) => {
     return new Response("Webhook signature verification failed", { status: 400, headers: corsHeaders });
   }
 
+  // Belt-and-suspenders: once this deployment is declared live, a test-mode
+  // event should never be acted on even if it somehow reaches this endpoint
+  // (e.g. the same URL registered for both test and live webhooks).
+  const stripeMode = Deno.env.get("STRIPE_MODE");
+  if (stripeMode === "live" && event.livemode === false) {
+    console.log("stripe-webhook: ignoring test-mode event while STRIPE_MODE=live", event.id, event.type);
+    return new Response(JSON.stringify({ received: true, ignored: "test-mode event" }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
   // Fire-and-forget: log a PAID order to the "inherit your freedom order to
@@ -303,6 +315,19 @@ Deno.serve(async (req) => {
       case "checkout.session.completed":
       case "checkout.session.async_payment_succeeded": {
         const session = event.data.object as Stripe.Checkout.Session;
+
+        // checkout.session.completed fires for async payment methods too,
+        // before they've actually settled - only treat the order as paid
+        // once Stripe confirms the payment itself, not just the redirect.
+        if (session.payment_status !== "paid") {
+          console.log(
+            "stripe-webhook: session completed but payment_status is not paid yet, skipping",
+            session.id,
+            session.payment_status,
+          );
+          break;
+        }
+
         const paymentIntent = typeof session.payment_intent === "string"
           ? session.payment_intent
           : session.payment_intent?.id ?? null;
@@ -322,12 +347,13 @@ Deno.serve(async (req) => {
             {
               stripe_session_id: session.id,
               stripe_payment_intent: paymentIntent,
-              price_id: session.metadata?.price_id || Deno.env.get("STRIPE_PRICE_ID") || "price_1TQsxLEJYM9YrDv1OPjC1nqg",
+              price_id: session.metadata?.price_id || Deno.env.get("STRIPE_PRICE_ID"),
               quantity: Number(session.metadata?.quantity ?? 1),
               customer_email: session.customer_email ?? session.customer_details?.email ?? null,
               amount_total: session.amount_total,
               currency: session.currency,
               status: "paid",
+              livemode: event.livemode,
               updated_at: new Date().toISOString(),
             },
             { onConflict: "stripe_session_id" },
@@ -348,7 +374,7 @@ Deno.serve(async (req) => {
         const session = event.data.object as Stripe.Checkout.Session;
         const { error } = await admin
           .from("orders")
-          .update({ status: "failed", updated_at: new Date().toISOString() })
+          .update({ status: "failed", livemode: event.livemode, updated_at: new Date().toISOString() })
           .eq("stripe_session_id", session.id);
         if (error) console.error("stripe-webhook: update (failed) failed", error);
         // Not sent to Zapier/Google Sheet - that sheet only tracks paid orders.

@@ -55,10 +55,18 @@ is meant to be cut over.
 - `STRIPE_WEBHOOK_SECRET` — the signing secret for the `stripe-webhook-orders`
   endpoint specifically (a new value - do not reuse the old webhook's secret,
   since Stripe signs each endpoint with its own secret)
-- `STRIPE_PRICE_ID` — optional; defaults to `price_1TQsxLEJYM9YrDv1OPjC1nqg` (the
-  live price) if unset. Set this to a **test-mode** price ID while testing,
-  since Stripe price IDs are mode-specific (a live price ID doesn't exist
-  under a test secret key, and vice versa).
+- `STRIPE_PRICE_ID` — **required**, no hardcoded fallback. Set this to a
+  **test-mode** price ID while testing and the **live** price ID
+  (`price_1TQsxLEJYM9YrDv1OPjC1nqg`) once live, since Stripe price IDs are
+  mode-specific (a live price ID doesn't exist under a test secret key, and
+  vice versa). `create-checkout-session` calls `stripe.prices.retrieve()` on
+  this ID before every checkout and refuses to proceed if it's inactive, or
+  (when `STRIPE_MODE=live`) not itself a live-mode price.
+- `STRIPE_MODE` — set to `live` once the project has fully cut over to real
+  charges. While set, both edge functions refuse to run with a `sk_test_`
+  secret key or a non-live price ID, and `stripe-webhook-orders` ignores any
+  `event.livemode === false` deliveries instead of acting on them. Leave
+  unset (or anything other than `live`) during testing.
 - `SITE_URL` — e.g. `https://cl-go-mikesignorelli.vercel.app` (used to build
   Stripe's `success_url`/`cancel_url`)
 - `ZAPIER_ORDER_WEBHOOK_URL` — the Catch Hook URL for the "inherit your

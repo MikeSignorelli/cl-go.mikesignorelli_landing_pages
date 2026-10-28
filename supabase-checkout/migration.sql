@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS public.orders (
   amount_total int,
   currency text,
   status text NOT NULL DEFAULT 'pending',
+  -- Whether this order was created against Stripe's live or test mode, so a
+  -- test-mode order can never be mistaken for a real paid order downstream.
+  livemode boolean,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );

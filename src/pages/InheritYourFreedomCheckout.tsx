@@ -15,6 +15,17 @@ import { submitLead, persistContact } from "@/lib/submitLead";
 const UNIT_PRICE = 47;
 const MAX_QTY = 10;
 
+// A test-mode publishable key must never ship in a production build - if the
+// live key wasn't set in Vercel's env vars before the last build, fail loud
+// and block checkout instead of silently taking "payments" no card is really charged for.
+const PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
+const IS_TEST_KEY_IN_PROD = import.meta.env.PROD && !!PUBLISHABLE_KEY?.startsWith("pk_test_");
+if (IS_TEST_KEY_IN_PROD) {
+  console.error(
+    "InheritYourFreedomCheckout: test-mode Stripe publishable key (pk_test_...) is set in a production build. Checkout is blocked.",
+  );
+}
+
 // supabase-js only gives a generic "non-2xx status code" message on function
 // errors - the useful text is in the response body our edge function sent.
 async function readFunctionErrorMessage(error: unknown): Promise<string> {
@@ -91,6 +102,14 @@ const InheritYourFreedomCheckout = () => {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (IS_TEST_KEY_IN_PROD) {
+      toast({
+        title: "Checkout unavailable",
+        description: "Payments are temporarily unavailable. Please try again shortly or contact support.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!validate()) return;
     const formEl = e.currentTarget;
     setSubmitting(true);
@@ -368,11 +387,11 @@ const InheritYourFreedomCheckout = () => {
                 type="submit"
                 variant="hero"
                 size="lg"
-                disabled={submitting}
+                disabled={submitting || IS_TEST_KEY_IN_PROD}
                 className="w-full h-14 text-base gap-2 transition-transform duration-200 hover:scale-[1.01]"
               >
                 <Lock size={16} />
-                {submitting ? "Processing..." : "Continue to Payment"}
+                {submitting ? "Processing..." : IS_TEST_KEY_IN_PROD ? "Checkout Unavailable" : "Continue to Payment"}
                 <ArrowRight size={18} />
               </Button>
 
