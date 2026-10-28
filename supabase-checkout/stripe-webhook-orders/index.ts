@@ -4,6 +4,7 @@
 
 import Stripe from "npm:stripe@17.7.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -17,9 +18,16 @@ const FROM = "Mike Signorelli <orders@mikesignorelli.com>";
 /** Renders the customer order-confirmation + admin new-order emails via Resend. Returns
  * "Sent" | "Partial" | "Failed" | "Skipped (no email service)" for the Zapier/Sheet row. */
 async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string> {
-  const resendKey = Deno.env.get("RESEND_API_KEY");
-  if (!resendKey) {
-    console.warn("stripe-webhook: RESEND_API_KEY not configured, skipping order emails");
+  // Sent over SMTP through our own mailbox rather than a third-party email API.
+  // Port 465 is implicit TLS; 587 is STARTTLS, which denomailer selects when tls
+  // is false. Providers generally want an app-specific password here, not the
+  // account password.
+  const smtpHost = Deno.env.get("SMTP_HOST");
+  const smtpUser = Deno.env.get("SMTP_USER");
+  const smtpPass = Deno.env.get("SMTP_PASS");
+  const smtpPort = Number(Deno.env.get("SMTP_PORT") ?? 465);
+  if (!smtpHost || !smtpUser || !smtpPass) {
+    console.warn("stripe-webhook: SMTP_HOST/SMTP_USER/SMTP_PASS not configured, skipping order emails");
     return "Skipped (no email service)";
   }
 
@@ -207,15 +215,27 @@ async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string
   </td></tr></table>
 </body></html>`;
 
+  // One connection for both messages, closed below so a failed send cannot leave
+  // the socket open for the rest of the invocation.
+  const client = new SMTPClient({
+    connection: {
+      hostname: smtpHost,
+      port: smtpPort,
+      tls: smtpPort === 465,
+      auth: { username: smtpUser, password: smtpPass },
+    },
+  });
+
   const sendEmail = async (to: string, subject: string, html: string) => {
-    const r = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to: [to], subject, html }),
-    });
-    const text = await r.text();
-    if (!r.ok) console.error(`stripe-webhook: Resend error to ${to}`, r.status, text);
-    return r.ok;
+    try {
+      await client.send({ from: FROM, to, subject, html, content: "auto" });
+      return true;
+    } catch (err) {
+      // Never rethrow: a bounced confirmation must not fail the webhook and have
+      // Stripe retry a payment we have already recorded.
+      console.error(`stripe-webhook: SMTP error to ${to}`, err);
+      return false;
+    }
   };
 
   let customerOk = false;
@@ -229,6 +249,12 @@ async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string
     `New Order #${orderNumber} - ${fullName} (${quantity}x Inherit Your Freedom)`,
     render(adminTpl),
   );
+
+  try {
+    await client.close();
+  } catch (err) {
+    console.error("stripe-webhook: SMTP close failed", err);
+  }
 
   if (customerOk && adminOk) return "Sent";
   if (customerOk || adminOk) return "Partial";

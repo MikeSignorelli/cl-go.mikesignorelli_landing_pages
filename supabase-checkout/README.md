@@ -77,6 +77,23 @@ is meant to be cut over.
   the payload (`first_name`, `email_address`, `zip_code`, `purchase_date`,
   `email_status`, etc) must match that Zap's Google Sheets step mapping
   exactly, since the Catch Hook step has no schema of its own.
+- `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_PORT` — the mailbox the order
+  confirmations are sent from. `stripe-webhook-orders` talks SMTP directly
+  rather than using a third-party email API, so these are the only email
+  credentials involved. `SMTP_PORT` defaults to 465 (implicit TLS); set 587 if
+  the provider wants STARTTLS. Most providers require an app-specific password,
+  not the account password. Without all three of host/user/pass the function
+  logs a warning and returns `Skipped (no email service)` — the order is still
+  recorded and posted to the sheet, only the emails are skipped.
+
+  The From address is `orders@mikesignorelli.com` and the admin copy goes to
+  `support@mikesignorelli.com` (both set at the top of the function). The
+  sending domain needs SPF and DKIM configured, or receiving servers will
+  reject or spam-folder the messages whichever provider relays them.
+
+  Supabase's own built-in email cannot be used here: it only delivers to members
+  of the Supabase organisation and is documented as not for production use, so
+  it would refuse to mail a customer.
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected by Supabase
 for every edge function — no need to set them manually.
