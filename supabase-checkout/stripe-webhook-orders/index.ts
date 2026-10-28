@@ -28,15 +28,35 @@ async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string
   const quantity = Number(m.quantity ?? 1);
   // amount_subtotal is the book price only (shipping is a separate shipping_options
   // line, not a line_item, so it's never included in the subtotal).
+  const round2 = (n: number) => Math.round(n * 100) / 100;
   const subtotal = (session.amount_subtotal ?? 0) / 100;
-  const shipping = (session.total_details?.amount_shipping ?? 0) / 100;
+  const discount = (session.total_details?.amount_discount ?? 0) / 100;
+  const tax = (session.total_details?.amount_tax ?? 0) / 100;
   const total = (session.amount_total ?? 0) / 100;
+
+  // Stripe does not always populate total_details.amount_shipping - payment links
+  // and some legacy sessions report neither it nor shipping_cost - and these
+  // figures are each read straight from the session, so nothing guarantees the
+  // printed lines add up to the printed total. That produced receipts reading
+  // "$1.00 + Free = $2.00". Attribute any unexplained remainder to shipping, the
+  // component Stripe omits. A negative remainder means the items exceed what was
+  // charged; leave it rather than invent a discount. Mirrors computeReceipt in
+  // supabase/functions/_shared/iyf-order.ts.
+  const reportedShipping =
+    (session.total_details?.amount_shipping ?? session.shipping_cost?.amount_total ?? 0) / 100;
+  const remainder = round2(total - (subtotal - discount + tax + reportedShipping));
+  const shipping = remainder > 0 ? round2(reportedShipping + remainder) : reportedShipping;
+
   const unitPrice = quantity > 0 ? subtotal / quantity : subtotal;
   const currency = (session.currency ?? "usd").toUpperCase();
   const fullName = `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim() || "Friend";
-  const now = new Date();
-  const orderDate = now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-  const orderTime = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+
+  // Stripe's session creation time, not now(). Using now() stamped the moment the
+  // webhook ran, so a Stripe retry or a replay put the wrong date on the receipt
+  // and disagreed with the purchase date written to the sheet.
+  const purchasedAt = session.created ? new Date(session.created * 1000) : new Date();
+  const orderDate = purchasedAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const orderTime = purchasedAt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
   const orderNumber = session.id.replace(/^cs_(test|live)_/, "").slice(0, 12).toUpperCase();
   const stripeMode = session.id.startsWith("cs_test_") ? "test/" : "";
   const paymentIntentId = typeof session.payment_intent === "string"
@@ -72,46 +92,46 @@ async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string
 
   const customerTpl = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Your Order is Confirmed - Inherit Your Freedom</title></head>
-<body style="margin:0; padding:0; background-color:#F5F1E8; font-family: Georgia, 'Times New Roman', serif; color:#2C2C2C;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F1E8; padding: 40px 20px;"><tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px; background-color:#FFFFFF; border:1px solid #E5DFD0; border-radius:4px; overflow:hidden;">
-      <tr><td style="background-color:#3D4A2A; padding: 32px 40px; text-align:center;">
-        <h1 style="margin:0; color:#F5F1E8; font-family: 'Helvetica Neue', Arial, sans-serif; font-size:14px; letter-spacing:4px; text-transform:uppercase; font-weight:600;">Mike Signorelli</h1>
-        <p style="margin:8px 0 0; color:#C9A961; font-family: 'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">Inherit Your Freedom</p>
+<body style="margin:0; padding:0; background-color:#F6F4EE; font-family: Georgia, 'Times New Roman', serif; color:#303B30;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F6F4EE; padding: 40px 20px;"><tr><td align="center">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px; background-color:#FFFFFF; border:1px solid #DEDBD3; border-radius:4px; overflow:hidden;">
+      <tr><td style="background-color:#303B30; padding: 32px 40px; text-align:center;">
+        <h1 style="margin:0; color:#F6F4EE; font-family: 'Helvetica Neue', Arial, sans-serif; font-size:14px; letter-spacing:4px; text-transform:uppercase; font-weight:600;">Mike Signorelli</h1>
+        <p style="margin:8px 0 0; color:#A88A5D; font-family: 'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">Inherit Your Freedom</p>
       </td></tr>
       <tr><td style="padding: 48px 40px 24px; text-align:center;">
-        <p style="margin:0 0 12px; color:#C9A961; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">Order Confirmed</p>
-        <h2 style="margin:0 0 16px; color:#2C2C2C; font-size:32px; font-weight:400; line-height:1.3;">Thank you for your order, {{customer_name}}.</h2>
-        <p style="margin:0; color:#5C5C5C; font-size:16px; line-height:1.6;">Your copy of <em>Inherit Your Freedom</em> is on its way. We're honored to be part of your journey into spiritual freedom.</p>
+        <p style="margin:0 0 12px; color:#A88A5D; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">Order Confirmed</p>
+        <h2 style="margin:0 0 16px; color:#303B30; font-size:32px; font-weight:400; line-height:1.3;">Thank you for your order, {{customer_name}}.</h2>
+        <p style="margin:0; color:#5E6E5E; font-size:16px; line-height:1.6;">Your copy of <em>Inherit Your Freedom</em> is on its way. We're honored to be part of your journey into spiritual freedom.</p>
       </td></tr>
       <tr><td style="padding: 24px 40px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E5DFD0; border-bottom:1px solid #E5DFD0; padding: 24px 0;"><tr><td style="padding: 24px 0;">
-          <p style="margin:0 0 16px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Order Summary</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #DEDBD3; border-bottom:1px solid #DEDBD3; padding: 24px 0;"><tr><td style="padding: 24px 0;">
+          <p style="margin:0 0 16px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Order Summary</p>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            <tr><td style="padding:8px 0; color:#2C2C2C; font-size:15px;">Inherit Your Freedom &times; {{quantity}}</td><td align="right" style="padding:8px 0; color:#2C2C2C; font-size:15px;">\${{subtotal}}</td></tr>
-            <tr><td style="padding:8px 0; color:#5C5C5C; font-size:14px;">Shipping</td><td align="right" style="padding:8px 0; color:#5C5C5C; font-size:14px;">\${{shipping}}</td></tr>
-            <tr><td style="padding:16px 0 0; border-top:1px solid #E5DFD0; color:#2C2C2C; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600;">Total Paid</td><td align="right" style="padding:16px 0 0; border-top:1px solid #E5DFD0; color:#3D4A2A; font-size:22px; font-weight:600;">\${{total}}</td></tr>
+            <tr><td style="padding:8px 0; color:#303B30; font-size:15px;">Inherit Your Freedom &times; {{quantity}}</td><td align="right" style="padding:8px 0; color:#303B30; font-size:15px;">\${{subtotal}}</td></tr>
+            <tr><td style="padding:8px 0; color:#5E6E5E; font-size:14px;">Shipping</td><td align="right" style="padding:8px 0; color:#5E6E5E; font-size:14px;">\${{shipping}}</td></tr>
+            <tr><td style="padding:16px 0 0; border-top:1px solid #DEDBD3; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600;">Total Paid</td><td align="right" style="padding:16px 0 0; border-top:1px solid #DEDBD3; color:#303B30; font-size:22px; font-weight:600;">\${{total}}</td></tr>
           </table>
-          <p style="margin:16px 0 0; color:#8A8A8A; font-size:13px;">Order #{{order_number}} &middot; {{order_date}}</p>
+          <p style="margin:16px 0 0; color:#5E6E5E; font-size:13px;">Order #{{order_number}} &middot; {{order_date}}</p>
         </td></tr></table>
       </td></tr>
       <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Shipping To</p>
-        <p style="margin:0; color:#2C2C2C; font-size:15px; line-height:1.7;">{{customer_name}}<br />{{shipping_street}}<br />{{shipping_city}}, {{shipping_state}} {{shipping_zip}}<br />{{shipping_country}}</p>
+        <p style="margin:0 0 12px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Shipping To</p>
+        <p style="margin:0; color:#303B30; font-size:15px; line-height:1.7;">{{customer_name}}<br />{{shipping_street}}<br />{{shipping_city}}, {{shipping_state}} {{shipping_zip}}<br />{{shipping_country}}</p>
       </td></tr>
-      <tr><td style="padding: 24px 40px; background-color:#F5F1E8;">
-        <p style="margin:0 0 16px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">What Happens Next</p>
-        <p style="margin:0 0 12px; color:#2C2C2C; font-size:15px; line-height:1.7;"><strong>1. Processing.</strong> Your order is being prepared with care.</p>
-        <p style="margin:0 0 12px; color:#2C2C2C; font-size:15px; line-height:1.7;"><strong>2. Shipping.</strong> You'll receive tracking details once your book ships.</p>
-        <p style="margin:0; color:#2C2C2C; font-size:15px; line-height:1.7;"><strong>3. Delivery.</strong> Most orders arrive within 5-7 business days.</p>
+      <tr><td style="padding: 24px 40px; background-color:#F6F4EE;">
+        <p style="margin:0 0 16px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">What Happens Next</p>
+        <p style="margin:0 0 12px; color:#303B30; font-size:15px; line-height:1.7;"><strong>1. Processing.</strong> Your order is being prepared with care.</p>
+        <p style="margin:0 0 12px; color:#303B30; font-size:15px; line-height:1.7;"><strong>2. Shipping.</strong> You'll receive tracking details once your book ships.</p>
+        <p style="margin:0; color:#303B30; font-size:15px; line-height:1.7;"><strong>3. Delivery.</strong> Most orders arrive within 5-7 business days.</p>
       </td></tr>
       <tr><td style="padding: 32px 40px; text-align:center;">
-        <p style="margin:0 0 12px; color:#5C5C5C; font-size:14px; line-height:1.6;">Questions about your order? We're here to help.</p>
-        <a href="mailto:collab@mikesignorelli.com" style="color:#C9A961; font-size:15px; font-weight:600; text-decoration:none; border-bottom:1px solid #C9A961;">collab@mikesignorelli.com</a>
+        <p style="margin:0 0 12px; color:#5E6E5E; font-size:14px; line-height:1.6;">Questions about your order? We're here to help.</p>
+        <a href="mailto:collab@mikesignorelli.com" style="color:#A88A5D; font-size:15px; font-weight:600; text-decoration:none; border-bottom:1px solid #A88A5D;">collab@mikesignorelli.com</a>
       </td></tr>
-      <tr><td style="background-color:#3D4A2A; padding: 24px 40px; text-align:center;">
-        <p style="margin:0; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px;">&copy; Mike Signorelli Ministries</p>
-        <p style="margin:8px 0 0; color:#C9A961; font-size:11px;">You're receiving this email because you placed an order at mikesignorelli.com</p>
+      <tr><td style="background-color:#303B30; padding: 24px 40px; text-align:center;">
+        <p style="margin:0; color:#F6F4EE; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px;">&copy; Mike Signorelli Ministries</p>
+        <p style="margin:8px 0 0; color:#A88A5D; font-size:11px;">You're receiving this email because you placed an order at mikesignorelli.com</p>
       </td></tr>
     </table>
   </td></tr></table>
@@ -119,69 +139,69 @@ async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string
 
   const adminTpl = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>New Order Received - Inherit Your Freedom</title></head>
-<body style="margin:0; padding:0; background-color:#F5F1E8; font-family: Georgia, 'Times New Roman', serif; color:#2C2C2C;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F1E8; padding: 40px 20px;"><tr><td align="center">
-    <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px; background-color:#FFFFFF; border:1px solid #E5DFD0; border-radius:4px; overflow:hidden;">
-      <tr><td style="background-color:#3D4A2A; padding: 28px 40px;"><table width="100%"><tr>
-        <td style="color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:13px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Admin Notification</td>
-        <td align="right" style="color:#C9A961; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Inherit Your Freedom</td>
+<body style="margin:0; padding:0; background-color:#F6F4EE; font-family: Georgia, 'Times New Roman', serif; color:#303B30;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F6F4EE; padding: 40px 20px;"><tr><td align="center">
+    <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px; background-color:#FFFFFF; border:1px solid #DEDBD3; border-radius:4px; overflow:hidden;">
+      <tr><td style="background-color:#303B30; padding: 28px 40px;"><table width="100%"><tr>
+        <td style="color:#F6F4EE; font-family:'Helvetica Neue', Arial, sans-serif; font-size:13px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Admin Notification</td>
+        <td align="right" style="color:#A88A5D; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Inherit Your Freedom</td>
       </tr></table></td></tr>
       <tr><td style="padding: 40px 40px 16px;">
-        <p style="margin:0 0 8px; color:#C9A961; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">New Order Received</p>
-        <h2 style="margin:0 0 8px; color:#2C2C2C; font-size:28px; font-weight:400; line-height:1.3;">Order #{{order_number}}</h2>
-        <p style="margin:0; color:#5C5C5C; font-size:14px;">Placed {{order_date}} &middot; {{order_time}}</p>
+        <p style="margin:0 0 8px; color:#A88A5D; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">New Order Received</p>
+        <h2 style="margin:0 0 8px; color:#303B30; font-size:28px; font-weight:400; line-height:1.3;">Order #{{order_number}}</h2>
+        <p style="margin:0; color:#5E6E5E; font-size:14px;">Placed {{order_date}} &middot; {{order_time}}</p>
       </td></tr>
       <tr><td style="padding: 16px 40px 24px;"><table cellpadding="0" cellspacing="0"><tr>
-        <td style="background-color:#E8F0DC; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 8px 14px; border-radius:20px;">Payment: paid</td>
+        <td style="background-color:#E8F0DC; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 8px 14px; border-radius:20px;">Payment: paid</td>
         <td style="width:8px;"></td>
         <td style="background-color:#FAF3DD; color:#8A6914; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 8px 14px; border-radius:20px;">Fulfillment: Pending</td>
       </tr></table></td></tr>
       <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Customer</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF5; border:1px solid #E5DFD0; border-radius:4px;"><tr><td style="padding: 16px 20px;">
-          <p style="margin:0 0 4px; color:#2C2C2C; font-size:16px; font-weight:600;">{{customer_name}}</p>
-          <p style="margin:0 0 2px; color:#5C5C5C; font-size:14px;"><a href="mailto:{{customer_email}}" style="color:#3D4A2A; text-decoration:none;">{{customer_email}}</a></p>
-          <p style="margin:0; color:#5C5C5C; font-size:14px;">{{customer_phone}}</p>
+        <p style="margin:0 0 12px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Customer</p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F0EEEA; border:1px solid #DEDBD3; border-radius:4px;"><tr><td style="padding: 16px 20px;">
+          <p style="margin:0 0 4px; color:#303B30; font-size:16px; font-weight:600;">{{customer_name}}</p>
+          <p style="margin:0 0 2px; color:#5E6E5E; font-size:14px;"><a href="mailto:{{customer_email}}" style="color:#303B30; text-decoration:none;">{{customer_email}}</a></p>
+          <p style="margin:0; color:#5E6E5E; font-size:14px;">{{customer_phone}}</p>
         </td></tr></table>
       </td></tr>
       <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Shipping Address</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF5; border:1px solid #E5DFD0; border-radius:4px;"><tr><td style="padding: 16px 20px; color:#2C2C2C; font-size:14px; line-height:1.7;">
+        <p style="margin:0 0 12px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Shipping Address</p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F0EEEA; border:1px solid #DEDBD3; border-radius:4px;"><tr><td style="padding: 16px 20px; color:#303B30; font-size:14px; line-height:1.7;">
           {{shipping_street}}<br />{{shipping_city}}, {{shipping_state}} {{shipping_zip}}<br />{{shipping_country}}
         </td></tr></table>
       </td></tr>
       <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Order Details</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E5DFD0; border-radius:4px;">
-          <tr style="background-color:#3D4A2A;">
-            <td style="padding:10px 16px; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Item</td>
-            <td align="center" style="padding:10px 16px; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Qty</td>
-            <td align="right" style="padding:10px 16px; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Price</td>
+        <p style="margin:0 0 12px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Order Details</p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #DEDBD3; border-radius:4px;">
+          <tr style="background-color:#303B30;">
+            <td style="padding:10px 16px; color:#F6F4EE; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Item</td>
+            <td align="center" style="padding:10px 16px; color:#F6F4EE; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Qty</td>
+            <td align="right" style="padding:10px 16px; color:#F6F4EE; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Price</td>
           </tr>
-          <tr><td style="padding:14px 16px; color:#2C2C2C; font-size:15px; border-bottom:1px solid #E5DFD0;">Inherit Your Freedom</td>
-            <td align="center" style="padding:14px 16px; color:#2C2C2C; font-size:15px; border-bottom:1px solid #E5DFD0;">{{quantity}}</td>
-            <td align="right" style="padding:14px 16px; color:#2C2C2C; font-size:15px; border-bottom:1px solid #E5DFD0;">\${{unit_price}}</td></tr>
-          <tr><td colspan="2" style="padding:10px 16px; color:#5C5C5C; font-size:13px;">Subtotal</td><td align="right" style="padding:10px 16px; color:#2C2C2C; font-size:14px;">\${{subtotal}}</td></tr>
-          <tr><td colspan="2" style="padding:6px 16px; color:#5C5C5C; font-size:13px;">Shipping</td><td align="right" style="padding:6px 16px; color:#2C2C2C; font-size:14px;">\${{shipping}}</td></tr>
-          <tr style="background-color:#FAFAF5;"><td colspan="2" style="padding:14px 16px; color:#2C2C2C; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; border-top:1px solid #E5DFD0;">Total</td>
-            <td align="right" style="padding:14px 16px; color:#3D4A2A; font-size:20px; font-weight:600; border-top:1px solid #E5DFD0;">\${{total}}</td></tr>
+          <tr><td style="padding:14px 16px; color:#303B30; font-size:15px; border-bottom:1px solid #DEDBD3;">Inherit Your Freedom</td>
+            <td align="center" style="padding:14px 16px; color:#303B30; font-size:15px; border-bottom:1px solid #DEDBD3;">{{quantity}}</td>
+            <td align="right" style="padding:14px 16px; color:#303B30; font-size:15px; border-bottom:1px solid #DEDBD3;">\${{unit_price}}</td></tr>
+          <tr><td colspan="2" style="padding:10px 16px; color:#5E6E5E; font-size:13px;">Subtotal</td><td align="right" style="padding:10px 16px; color:#303B30; font-size:14px;">\${{subtotal}}</td></tr>
+          <tr><td colspan="2" style="padding:6px 16px; color:#5E6E5E; font-size:13px;">Shipping</td><td align="right" style="padding:6px 16px; color:#303B30; font-size:14px;">\${{shipping}}</td></tr>
+          <tr style="background-color:#F0EEEA;"><td colspan="2" style="padding:14px 16px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; border-top:1px solid #DEDBD3;">Total</td>
+            <td align="right" style="padding:14px 16px; color:#303B30; font-size:20px; font-weight:600; border-top:1px solid #DEDBD3;">\${{total}}</td></tr>
         </table>
       </td></tr>
       <tr><td style="padding: 0 40px 32px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Payment</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF5; border:1px solid #E5DFD0; border-radius:4px;"><tr><td style="padding: 14px 20px; font-size:14px; color:#2C2C2C;">
+        <p style="margin:0 0 12px; color:#303B30; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Payment</p>
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#F0EEEA; border:1px solid #DEDBD3; border-radius:4px;"><tr><td style="padding: 14px 20px; font-size:14px; color:#303B30;">
           <table width="100%">
-            <tr><td style="color:#5C5C5C;">Method</td><td align="right">{{payment_method}}</td></tr>
-            <tr><td style="color:#5C5C5C; padding-top:6px;">Stripe Session</td><td align="right" style="padding-top:6px; font-family:'SF Mono', Menlo, monospace; font-size:12px;">{{stripe_session_id}}</td></tr>
-            <tr><td style="color:#5C5C5C; padding-top:6px;">Amount Paid</td><td align="right" style="padding-top:6px; color:#3D4A2A; font-weight:600;">\${{total}} {{currency}}</td></tr>
+            <tr><td style="color:#5E6E5E;">Method</td><td align="right">{{payment_method}}</td></tr>
+            <tr><td style="color:#5E6E5E; padding-top:6px;">Stripe Session</td><td align="right" style="padding-top:6px; font-family:'SF Mono', Menlo, monospace; font-size:12px;">{{stripe_session_id}}</td></tr>
+            <tr><td style="color:#5E6E5E; padding-top:6px;">Amount Paid</td><td align="right" style="padding-top:6px; color:#303B30; font-weight:600;">\${{total}} {{currency}}</td></tr>
           </table>
         </td></tr></table>
       </td></tr>
       <tr><td align="center" style="padding: 0 40px 40px;">
-        <a href="{{stripe_dashboard_url}}" style="display:inline-block; background-color:#3D4A2A; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 14px 28px; text-decoration:none; border-radius:2px;">View in Stripe Dashboard</a>
+        <a href="{{stripe_dashboard_url}}" style="display:inline-block; background-color:#303B30; color:#F6F4EE; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 14px 28px; text-decoration:none; border-radius:2px;">View in Stripe Dashboard</a>
       </td></tr>
-      <tr><td style="background-color:#3D4A2A; padding: 20px 40px; text-align:center;">
-        <p style="margin:0; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px;">Action required: Process and ship this order.</p>
+      <tr><td style="background-color:#303B30; padding: 20px 40px; text-align:center;">
+        <p style="margin:0; color:#F6F4EE; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px;">Action required: Process and ship this order.</p>
       </td></tr>
     </table>
   </td></tr></table>
