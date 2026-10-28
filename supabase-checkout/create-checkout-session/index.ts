@@ -14,6 +14,11 @@ const corsHeaders = {
 
 const DEFAULT_PRICE_ID = "price_1TQsxLEJYM9YrDv1OPjC1nqg";
 const DEFAULT_SITE_URL = "https://cl-go-mikesignorelli.vercel.app";
+// Must match the flat shipping fee shown on the checkout page (src/pages/
+// InheritYourFreedomCheckout.tsx: `const shipping = 6.99;`) - that figure is
+// purely cosmetic in the React state and was never actually charged, since
+// the Stripe session only priced the book itself.
+const SHIPPING_CENTS = 699;
 
 interface ShippingInput {
   firstName?: string;
@@ -94,6 +99,15 @@ Deno.serve(async (req) => {
       customer_email: typeof email === "string" && email !== "" ? email : undefined,
       line_items: [{ price: priceId, quantity }],
       shipping_address_collection: { allowed_countries: ["US", "CA", "GB", "AU", "NZ", "IE"] },
+      shipping_options: [
+        {
+          shipping_rate_data: {
+            type: "fixed_amount",
+            fixed_amount: { amount: SHIPPING_CENTS, currency: "usd" },
+            display_name: "Shipping",
+          },
+        },
+      ],
       metadata: {
         price_id: priceId,
         first_name: shipping.firstName ?? "",
