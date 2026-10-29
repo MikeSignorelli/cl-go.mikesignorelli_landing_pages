@@ -98,6 +98,8 @@ export interface Receipt {
 }
 
 const cents = (n: number | null | undefined) => (typeof n === "number" ? n : 0) / 100;
+/** Keeps the reconciliation below free of binary floating-point dust. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Receipt amounts taken from Stripe's own session totals - no hardcoded shipping. */
 export function computeReceipt(session: SessionLike, lineItems: LineItemLike[]): Receipt {
@@ -106,13 +108,29 @@ export function computeReceipt(session: SessionLike, lineItems: LineItemLike[]):
   const td = session.total_details ?? {};
   const shippingCents = td.amount_shipping ?? session.shipping_cost?.amount_total ?? 0;
   const subtotal = cents(itemsSubtotal || session.amount_subtotal);
+  const discount = cents(td.amount_discount);
+  const tax = cents(td.amount_tax);
+  const total = cents(session.amount_total);
+
+  // Stripe does not always break shipping out into total_details.amount_shipping
+  // or shipping_cost (payment links and some legacy sessions report neither), so
+  // the figures above could print a receipt whose own lines did not add up to the
+  // total beneath them - e.g. "$1.00 + Free = $2.00". Attribute any unexplained
+  // remainder to shipping, which is the component Stripe omits, so the receipt is
+  // always internally consistent. A negative remainder would mean the line items
+  // exceed what was charged; leave shipping alone there rather than invent a
+  // discount, and let the printed total stand as the authoritative amount.
+  const reportedShipping = cents(shippingCents);
+  const remainder = round2(total - (subtotal - discount + tax + reportedShipping));
+  const shipping = remainder > 0 ? round2(reportedShipping + remainder) : reportedShipping;
+
   return {
     quantity,
     subtotal,
-    shipping: cents(shippingCents),
-    discount: cents(td.amount_discount),
-    tax: cents(td.amount_tax),
-    total: cents(session.amount_total),
+    shipping,
+    discount,
+    tax,
+    total,
     unitPrice: subtotal / quantity,
   };
 }

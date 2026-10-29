@@ -24,21 +24,58 @@ const SUPPORT_EMAIL = "support@mikesignorelli.com";
 
 function buildEmailData(session: Stripe.Checkout.Session, customerName: string): OrderEmailData {
   const m = session.metadata ?? {};
+  const quantity = Number(m.quantity ?? 1);
+
+  // amount_subtotal is the book price only (shipping is a separate
+  // shipping_options line, not a line_item, so it's never included in the
+  // subtotal). Stripe doesn't always populate total_details.amount_shipping -
+  // payment links and some legacy sessions report neither it nor
+  // shipping_cost - so nothing guarantees the printed lines add up to the
+  // printed total. That produced receipts reading "$1.00 + Free = $2.00".
+  // Attribute any unexplained remainder to shipping, the component Stripe
+  // omits. A negative remainder means the items exceed what was charged;
+  // leave it rather than invent a discount.
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const subtotal = (session.amount_subtotal ?? 0) / 100;
+  const discount = (session.total_details?.amount_discount ?? 0) / 100;
+  const tax = (session.total_details?.amount_tax ?? 0) / 100;
+  const total = (session.amount_total ?? 0) / 100;
+  const reportedShipping =
+    (session.total_details?.amount_shipping ?? session.shipping_cost?.amount_total ?? 0) / 100;
+  const remainder = round2(total - (subtotal - discount + tax + reportedShipping));
+  const shipping = remainder > 0 ? round2(reportedShipping + remainder) : reportedShipping;
+
+  // Stripe's session creation time, not now(). Using now() would stamp the
+  // moment the webhook ran, so a Stripe retry or a replay puts the wrong
+  // date on the receipt and disagrees with the purchase date written to
+  // the sheet.
+  const purchasedAt = session.created ? new Date(session.created * 1000) : new Date();
+  const paymentIntentId = typeof session.payment_intent === "string"
+    ? session.payment_intent
+    : session.payment_intent?.id ?? "";
+  const stripeMode = session.id.startsWith("cs_test_") ? "test/" : "";
+
   return {
     customerName,
     customerEmail: session.customer_email ?? session.customer_details?.email ?? "",
     customerPhone: m.customer_phone ?? session.customer_details?.phone ?? "",
     productName: "Inherit Your Freedom",
-    quantity: Number(m.quantity ?? 1),
+    quantity,
+    unitPriceCents: Math.round((quantity > 0 ? subtotal / quantity : subtotal) * 100),
+    subtotalCents: Math.round(subtotal * 100),
+    shippingCents: Math.round(shipping * 100),
     amountTotal: session.amount_total ?? 0,
     currency: session.currency ?? "usd",
     orderId: session.id,
-    orderDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    orderDate: purchasedAt.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    orderTime: purchasedAt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
     shippingStreet: m.shipping_street ?? "",
     shippingCity: m.shipping_city ?? "",
     shippingState: m.shipping_state ?? "",
     shippingZip: m.shipping_zip ?? "",
     shippingCountry: m.shipping_country ?? "",
+    paymentMethod: (session.payment_method_types?.[0] ?? "card").toUpperCase(),
+    stripeDashboardUrl: `https://dashboard.stripe.com/${stripeMode}payments/${paymentIntentId}`,
     supportEmail: SUPPORT_EMAIL,
   };
 }

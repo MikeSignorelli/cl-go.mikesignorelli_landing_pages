@@ -61,21 +61,36 @@ Deno.serve(async (req) => {
     );
   }
 
+  // The orders table only stores the final amount_total, not the
+  // subtotal/shipping breakdown Stripe reports on the session - that split is
+  // computed once, at webhook time, from the live Checkout Session. A resend
+  // can only reconstruct the total, so it's shown as a single "Subtotal" line
+  // with no separate shipping charge.
+  const orderDate = new Date(order.created_at);
+  const stripeMode = order.livemode === false ? "test/" : "";
   const data: OrderEmailData = {
     customerName: order.customer_name || `${order.first_name ?? ""} ${order.last_name ?? ""}`.trim() || "Friend",
     customerEmail: order.customer_email || "",
     customerPhone: order.customer_phone || "",
     productName: "Inherit Your Freedom",
     quantity: order.quantity,
+    unitPriceCents: order.quantity > 0 ? Math.round((order.amount_total ?? 0) / order.quantity) : order.amount_total ?? 0,
+    subtotalCents: order.amount_total ?? 0,
+    shippingCents: 0,
     amountTotal: order.amount_total ?? 0,
     currency: order.currency ?? "usd",
     orderId: order.stripe_session_id,
-    orderDate: new Date(order.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    orderDate: orderDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    orderTime: orderDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
     shippingStreet: order.shipping_street || "",
     shippingCity: order.shipping_city || "",
     shippingState: order.shipping_state || "",
     shippingZip: order.shipping_zip || "",
     shippingCountry: order.shipping_country || "",
+    paymentMethod: "CARD",
+    stripeDashboardUrl: order.stripe_payment_intent
+      ? `https://dashboard.stripe.com/${stripeMode}payments/${order.stripe_payment_intent}`
+      : `https://dashboard.stripe.com/${stripeMode}payments`,
     supportEmail: "support@mikesignorelli.com",
   };
 

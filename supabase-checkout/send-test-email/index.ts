@@ -31,21 +31,28 @@ Deno.serve(async (req) => {
     return json({ success: false, error: "Valid 'to' email required" }, 400);
   }
 
+  const now = new Date();
   const dummy: OrderEmailData = {
     customerName: "Test Customer",
     customerEmail: to,
     customerPhone: "555-555-5555",
     productName: "Inherit Your Freedom",
     quantity: 1,
+    unitPriceCents: 4899,
+    subtotalCents: 4899,
+    shippingCents: 500,
     amountTotal: 5399,
     currency: "usd",
     orderId: `test_${Date.now()}`,
-    orderDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    orderDate: now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    orderTime: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
     shippingStreet: "123 Test St",
     shippingCity: "Testville",
     shippingState: "CA",
     shippingZip: "90001",
     shippingCountry: "US",
+    paymentMethod: "CARD",
+    stripeDashboardUrl: "https://dashboard.stripe.com/test/payments",
     supportEmail: "support@mikesignorelli.com",
   };
 

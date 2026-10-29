@@ -51,24 +51,35 @@ secret the old `create-checkout`/`notify-order` functions read - set them
 fresh rather than reusing that one, since this is the point where the project
 is meant to be cut over.
 
-- `STRIPE_SECRET_KEY` — `sk_test_...` while testing, `sk_live_...` once verified
-- `STRIPE_WEBHOOK_SECRET` — the signing secret for the `stripe-webhook-orders`
-  endpoint specifically (a new value - do not reuse the old webhook's secret,
-  since Stripe signs each endpoint with its own secret)
-- `STRIPE_PRICE_ID` — **required**, no hardcoded fallback. Set this to a
-  **test-mode** price ID while testing and the **live** price ID
-  (`price_1TQsxLEJYM9YrDv1OPjC1nqg`) once live, since Stripe price IDs are
-  mode-specific (a live price ID doesn't exist under a test secret key, and
-  vice versa). `create-checkout-session` calls `stripe.prices.retrieve()` on
-  this ID before every checkout and refuses to proceed if it's inactive, or
-  (when `STRIPE_MODE=live`) not itself a live-mode price.
-- `STRIPE_MODE` — set to `live` once the project has fully cut over to real
-  charges. While set, both edge functions refuse to run with a `sk_test_`
-  secret key or a non-live price ID, and `stripe-webhook-orders` ignores any
-  `event.livemode === false` deliveries instead of acting on them. Leave
-  unset (or anything other than `live`) during testing.
+### Stripe TEST/LIVE switch
+
+Both key sets are kept as secrets at the same time; `STRIPE_MODE` picks which
+one `_shared/stripe.ts`'s `getStripeConfig()`/`getWebhookSecret()` use, so
+switching modes is a secret change, not a redeploy.
+
+- `STRIPE_MODE` — `test` or `live`. Selects every `_TEST`/`_LIVE` suffixed
+  secret below. While `live`, both edge functions refuse to run with a
+  mismatched (`sk_test_...`) key or a non-live-mode price, and
+  `stripe-webhook-orders` ignores any `event.livemode === false` deliveries
+  instead of acting on them.
+- `STRIPE_SECRET_KEY_TEST`, `STRIPE_SECRET_KEY_LIVE` — `sk_test_...` /
+  `sk_live_...`.
+- `STRIPE_WEBHOOK_SECRET_TEST`, `STRIPE_WEBHOOK_SECRET_LIVE` — the signing
+  secret for the `stripe-webhook-orders` endpoint, one per Stripe webhook
+  registration (test mode and live mode are registered separately in the
+  Stripe dashboard, each with its own secret - do not reuse the old
+  `stripe-webhook` function's secret).
+- `STRIPE_PRICE_ID_TEST`, `STRIPE_PRICE_ID_LIVE` — **required**, no hardcoded
+  fallback. Price IDs are mode-specific (a live price ID doesn't exist under
+  a test secret key, and vice versa). `create-checkout-session` calls
+  `stripe.prices.retrieve()` on the active one before every checkout and
+  refuses to proceed if it's inactive, or (in live mode) not itself a
+  live-mode price. The live price is `price_1TQsxLEJYM9YrDv1OPjC1nqg`.
 - `SITE_URL` — e.g. `https://cl-go-mikesignorelli.vercel.app` (used to build
   Stripe's `success_url`/`cancel_url`)
+
+### Google Sheet logging
+
 - `ZAPIER_ORDER_WEBHOOK_URL` — the Catch Hook URL for the "inherit your
   freedom order to google sheet" Zap (Webhooks by Zapier -> Google Sheets).
   `create-checkout-session` posts a `payment_status: "pending"` row here right
@@ -77,6 +88,41 @@ is meant to be cut over.
   the payload (`first_name`, `email_address`, `zip_code`, `purchase_date`,
   `email_status`, etc) must match that Zap's Google Sheets step mapping
   exactly, since the Catch Hook step has no schema of its own.
+
+### Order confirmation email
+
+`stripe-webhook-orders`, `send-test-email`, and `resend-order-email` each send
+through the shared `_shared/sendEmail.ts` helper: SMTP (nodemailer, port 465
+implicit TLS) first, falling back to the Resend HTTP API if SMTP isn't
+configured or the send itself fails. Supabase Edge Functions block outbound
+ports 25 and 587, so 465 is the only SMTP port that works at all.
+
+- `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` — the mailbox the order confirmations
+  are sent from. Most providers require an app-specific password, not the
+  account password. Without all three, `sendEmail()` falls straight through
+  to the Resend fallback below.
+- `SMTP_PORT` — defaults to `465` if unset.
+- `SMTP_FROM_NAME` — display name on the From header, defaults to
+  "Mike Signorelli".
+- `SMTP_FROM_EMAIL` — only set this once that address is verified as a
+  "Send mail as" alias on the sending account (Gmail → Settings → Accounts).
+  Until then, leave it unset: it defaults to the `SMTP_USER` mailbox, which is
+  the one address Gmail (and most providers) never silently rewrites the From
+  header to.
+- `ADMIN_EMAIL` — where the admin copy of each order notification goes.
+  Recipients are unrestricted, no verification needed. Falls back to
+  `support@mikesignorelli.com` if unset.
+- `RESEND_API_KEY` — optional fallback HTTP email API, used only when SMTP is
+  unconfigured or a send fails.
+- `TEST_EMAIL_SECRET` — the `x-admin-secret` header value required by
+  `send-test-email` and `resend-order-email`, so these endpoints can't be
+  invoked by anyone who doesn't already have this secret.
+
+The sending domain needs SPF and DKIM configured, or receiving servers will
+reject or spam-folder the messages whichever provider relays them. Supabase's
+own built-in email cannot be used here: it only delivers to members of the
+Supabase organisation and is documented as not for production use, so it
+would refuse to mail a customer.
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected by Supabase
 for every edge function — no need to set them manually.

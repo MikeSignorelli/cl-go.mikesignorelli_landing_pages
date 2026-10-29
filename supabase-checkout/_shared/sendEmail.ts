@@ -26,12 +26,18 @@ async function sendViaSmtp(input: SendEmailInput): Promise<SendEmailResult> {
   const port = Number(Deno.env.get("SMTP_PORT") || "465");
   const user = Deno.env.get("SMTP_USER");
   const pass = Deno.env.get("SMTP_PASS");
-  const fromEmail = Deno.env.get("SMTP_FROM_EMAIL");
   const fromName = Deno.env.get("SMTP_FROM_NAME") || "Mike Signorelli";
 
-  if (!host || !user || !pass || !fromEmail) {
+  if (!host || !user || !pass) {
     return { success: false, error: "SMTP not configured" };
   }
+
+  // Gmail (and most providers) rewrite the From header to the authenticated
+  // mailbox unless the address is a verified "Send mail as" alias on that
+  // account, so defaulting to the SMTP user is the one value that's never
+  // silently rewritten. Only set SMTP_FROM_EMAIL once that address is
+  // actually verified as an alias on the sending account.
+  const fromEmail = Deno.env.get("SMTP_FROM_EMAIL") || user;
 
   const transporter = nodemailer.createTransport({
     host,
