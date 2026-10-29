@@ -19,7 +19,8 @@ const MAX_QTY = 10;
 // live key wasn't set in Vercel's env vars before the last build, fail loud
 // and block checkout instead of silently taking "payments" no card is really charged for.
 const PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
-const IS_TEST_KEY_IN_PROD = import.meta.env.PROD && !!PUBLISHABLE_KEY?.startsWith("pk_test_");
+const IS_TEST_KEY = !!PUBLISHABLE_KEY?.startsWith("pk_test_");
+const IS_TEST_KEY_IN_PROD = import.meta.env.PROD && IS_TEST_KEY;
 if (IS_TEST_KEY_IN_PROD) {
   console.error(
     "InheritYourFreedomCheckout: test-mode Stripe publishable key (pk_test_...) is set in a production build. Checkout is blocked.",
@@ -163,6 +164,11 @@ const InheritYourFreedomCheckout = () => {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <IYFHeader />
+      {IS_TEST_KEY && (
+        <div className="fixed top-0 inset-x-0 z-50 bg-amber-400 text-amber-950 text-center text-xs font-heading uppercase tracking-widest py-1.5">
+          Test Mode - no real charge will be made
+        </div>
+      )}
       <main className="flex-1 pt-32 md:pt-36">
         <section className="max-w-7xl mx-auto px-6 md:px-12 py-12 md:py-16">
           <nav className="font-body text-sm text-muted-foreground mb-8">

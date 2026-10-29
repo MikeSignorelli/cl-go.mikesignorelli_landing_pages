@@ -3,8 +3,8 @@
 // the root supabase/ project. Price is always resolved server-side; the
 // client only ever sends quantity + contact/shipping details.
 
-import Stripe from "npm:stripe@17.7.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { getStripeConfig } from "./_shared/stripe.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,26 +50,14 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-    if (!stripeKey) {
-      console.error("create-checkout-session: STRIPE_SECRET_KEY not configured");
+    let config;
+    try {
+      config = getStripeConfig();
+    } catch (err) {
+      console.error("create-checkout-session: Stripe config error", (err as Error).message);
       return json({ error: "Payment processing is not configured" }, 500);
     }
-
-    // ---- Live-mode guard: a test key must never be used once the deployment
-    // is declared live, or a misconfigured secret would silently fall back to
-    // test-mode charges. STRIPE_MODE is a manual flag set alongside the secrets.
-    const stripeMode = Deno.env.get("STRIPE_MODE");
-    if (stripeMode === "live" && stripeKey.startsWith("sk_test_")) {
-      console.error("create-checkout-session: test key in live mode");
-      return json({ error: "Stripe is misconfigured: test key in live mode" }, 500);
-    }
-
-    const priceId = Deno.env.get("STRIPE_PRICE_ID");
-    if (!priceId) {
-      console.error("create-checkout-session: STRIPE_PRICE_ID not configured");
-      return json({ error: "Payment processing is not configured" }, 500);
-    }
+    const { stripe, mode, priceId } = config;
 
     const body = await req.json().catch(() => null);
     if (!body || typeof body !== "object") {
@@ -83,7 +71,9 @@ Deno.serve(async (req) => {
       return json({ error: "Quantity must be a whole number between 1 and 10" }, 400);
     }
 
-    // ---- Email: optional, but must look like an email if present.
+    // ---- Email: optional, but must look like an email if present. Passed
+    // through to Stripe as customer_email so session.customer_details.email
+    // is populated even if the shopper never types it into Stripe's form.
     const email = (body as Record<string, unknown>).email;
     if (email !== undefined && email !== null && email !== "") {
       if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -104,19 +94,17 @@ Deno.serve(async (req) => {
 
     const siteUrl = Deno.env.get("SITE_URL") || DEFAULT_SITE_URL;
 
-    const stripe = new Stripe(stripeKey, { apiVersion: "2024-11-20.acacia" });
-
-    // ---- Verify the configured price actually exists, is active, and (in
-    // live mode) is itself a live-mode price - test and live prices are
-    // separate objects in Stripe even when the ID format looks identical.
+    // ---- Verify the configured price actually exists, is active, and
+    // matches the current mode - test and live prices are separate objects
+    // in Stripe even when the ID format looks identical.
     const price = await stripe.prices.retrieve(priceId);
     if (!price.active) {
       console.error("create-checkout-session: configured price is not active", priceId);
       return json({ error: "Payment processing is not configured" }, 500);
     }
-    if (stripeMode === "live" && !price.livemode) {
-      console.error("create-checkout-session: configured price is not a live-mode price", priceId);
-      return json({ error: "Stripe is misconfigured: test price in live mode" }, 500);
+    if (price.livemode !== (mode === "live")) {
+      console.error(`create-checkout-session: configured price does not match ${mode} mode`, priceId);
+      return json({ error: `Stripe is misconfigured: price does not match ${mode} mode` }, 500);
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -159,11 +147,13 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (supabaseUrl && serviceKey) {
       const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+      const customerName = `${shipping.firstName ?? ""} ${shipping.lastName ?? ""}`.trim() || null;
       const { error: insertErr } = await admin.from("orders").insert({
         stripe_session_id: session.id,
         price_id: priceId,
         quantity,
         customer_email: typeof email === "string" ? email : null,
+        customer_name: customerName,
         first_name: shipping.firstName,
         last_name: shipping.lastName,
         customer_phone: shipping.phone,

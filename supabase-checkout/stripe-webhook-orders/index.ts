@@ -2,8 +2,17 @@
 // directly (no Supabase auth header), so it's deployed with
 // --no-verify-jwt. Deployed to project gprrntuvxyzyjbwgqwce (see ../README.md).
 
-import Stripe from "npm:stripe@17.7.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import type Stripe from "npm:stripe@17.7.0";
+import { getStripeConfig, getWebhookSecret } from "./_shared/stripe.ts";
+import { sendEmail } from "./_shared/sendEmail.ts";
+import {
+  renderAdminEmailHtml,
+  renderAdminEmailText,
+  renderCustomerEmailHtml,
+  renderCustomerEmailText,
+  type OrderEmailData,
+} from "./_shared/emails/orderConfirmation.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,208 +20,27 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ADMIN_EMAIL = "support@mikesignorelli.com";
-const FROM = "Mike Signorelli <orders@mikesignorelli.com>";
+const SUPPORT_EMAIL = "support@mikesignorelli.com";
 
-/** Renders the customer order-confirmation + admin new-order emails via Resend. Returns
- * "Sent" | "Partial" | "Failed" | "Skipped (no email service)" for the Zapier/Sheet row. */
-async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string> {
-  const resendKey = Deno.env.get("RESEND_API_KEY");
-  if (!resendKey) {
-    console.warn("stripe-webhook: RESEND_API_KEY not configured, skipping order emails");
-    return "Skipped (no email service)";
-  }
-
+function buildEmailData(session: Stripe.Checkout.Session, customerName: string): OrderEmailData {
   const m = session.metadata ?? {};
-  const email = session.customer_email ?? session.customer_details?.email ?? "";
-  const quantity = Number(m.quantity ?? 1);
-  // amount_subtotal is the book price only (shipping is a separate shipping_options
-  // line, not a line_item, so it's never included in the subtotal).
-  const subtotal = (session.amount_subtotal ?? 0) / 100;
-  const shipping = (session.total_details?.amount_shipping ?? 0) / 100;
-  const total = (session.amount_total ?? 0) / 100;
-  const unitPrice = quantity > 0 ? subtotal / quantity : subtotal;
-  const currency = (session.currency ?? "usd").toUpperCase();
-  const fullName = `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim() || "Friend";
-  const now = new Date();
-  const orderDate = now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-  const orderTime = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-  const orderNumber = session.id.replace(/^cs_(test|live)_/, "").slice(0, 12).toUpperCase();
-  const stripeMode = session.id.startsWith("cs_test_") ? "test/" : "";
-  const paymentIntentId = typeof session.payment_intent === "string"
-    ? session.payment_intent
-    : session.payment_intent?.id ?? "";
-  const stripeDashboardUrl = `https://dashboard.stripe.com/${stripeMode}payments/${paymentIntentId}`;
-  const paymentMethod = (session.payment_method_types?.[0] ?? "card").toUpperCase();
-
-  const vars: Record<string, string> = {
-    customer_name: fullName,
-    customer_email: email,
-    customer_phone: m.customer_phone ?? session.customer_details?.phone ?? "-",
-    quantity: String(quantity),
-    unit_price: unitPrice.toFixed(2),
-    subtotal: subtotal.toFixed(2),
-    shipping: shipping.toFixed(2),
-    total: total.toFixed(2),
-    currency,
-    order_number: orderNumber,
-    order_date: orderDate,
-    order_time: orderTime,
-    shipping_street: m.shipping_street ?? "",
-    shipping_city: m.shipping_city ?? "",
-    shipping_state: m.shipping_state ?? "",
-    shipping_zip: m.shipping_zip ?? "",
-    shipping_country: m.shipping_country ?? "",
-    payment_method: paymentMethod,
-    stripe_session_id: session.id,
-    stripe_dashboard_url: stripeDashboardUrl,
+  return {
+    customerName,
+    customerEmail: session.customer_email ?? session.customer_details?.email ?? "",
+    customerPhone: m.customer_phone ?? session.customer_details?.phone ?? "",
+    productName: "Inherit Your Freedom",
+    quantity: Number(m.quantity ?? 1),
+    amountTotal: session.amount_total ?? 0,
+    currency: session.currency ?? "usd",
+    orderId: session.id,
+    orderDate: new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+    shippingStreet: m.shipping_street ?? "",
+    shippingCity: m.shipping_city ?? "",
+    shippingState: m.shipping_state ?? "",
+    shippingZip: m.shipping_zip ?? "",
+    shippingCountry: m.shipping_country ?? "",
+    supportEmail: SUPPORT_EMAIL,
   };
-
-  const render = (tpl: string) => tpl.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => vars[k] ?? "");
-
-  const customerTpl = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>Your Order is Confirmed - Inherit Your Freedom</title></head>
-<body style="margin:0; padding:0; background-color:#F5F1E8; font-family: Georgia, 'Times New Roman', serif; color:#2C2C2C;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F1E8; padding: 40px 20px;"><tr><td align="center">
-    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px; background-color:#FFFFFF; border:1px solid #E5DFD0; border-radius:4px; overflow:hidden;">
-      <tr><td style="background-color:#3D4A2A; padding: 32px 40px; text-align:center;">
-        <h1 style="margin:0; color:#F5F1E8; font-family: 'Helvetica Neue', Arial, sans-serif; font-size:14px; letter-spacing:4px; text-transform:uppercase; font-weight:600;">Mike Signorelli</h1>
-        <p style="margin:8px 0 0; color:#C9A961; font-family: 'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">Inherit Your Freedom</p>
-      </td></tr>
-      <tr><td style="padding: 48px 40px 24px; text-align:center;">
-        <p style="margin:0 0 12px; color:#C9A961; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">Order Confirmed</p>
-        <h2 style="margin:0 0 16px; color:#2C2C2C; font-size:32px; font-weight:400; line-height:1.3;">Thank you for your order, {{customer_name}}.</h2>
-        <p style="margin:0; color:#5C5C5C; font-size:16px; line-height:1.6;">Your copy of <em>Inherit Your Freedom</em> is on its way. We're honored to be part of your journey into spiritual freedom.</p>
-      </td></tr>
-      <tr><td style="padding: 24px 40px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #E5DFD0; border-bottom:1px solid #E5DFD0; padding: 24px 0;"><tr><td style="padding: 24px 0;">
-          <p style="margin:0 0 16px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Order Summary</p>
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
-            <tr><td style="padding:8px 0; color:#2C2C2C; font-size:15px;">Inherit Your Freedom &times; {{quantity}}</td><td align="right" style="padding:8px 0; color:#2C2C2C; font-size:15px;">\${{subtotal}}</td></tr>
-            <tr><td style="padding:8px 0; color:#5C5C5C; font-size:14px;">Shipping</td><td align="right" style="padding:8px 0; color:#5C5C5C; font-size:14px;">\${{shipping}}</td></tr>
-            <tr><td style="padding:16px 0 0; border-top:1px solid #E5DFD0; color:#2C2C2C; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600;">Total Paid</td><td align="right" style="padding:16px 0 0; border-top:1px solid #E5DFD0; color:#3D4A2A; font-size:22px; font-weight:600;">\${{total}}</td></tr>
-          </table>
-          <p style="margin:16px 0 0; color:#8A8A8A; font-size:13px;">Order #{{order_number}} &middot; {{order_date}}</p>
-        </td></tr></table>
-      </td></tr>
-      <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Shipping To</p>
-        <p style="margin:0; color:#2C2C2C; font-size:15px; line-height:1.7;">{{customer_name}}<br />{{shipping_street}}<br />{{shipping_city}}, {{shipping_state}} {{shipping_zip}}<br />{{shipping_country}}</p>
-      </td></tr>
-      <tr><td style="padding: 24px 40px; background-color:#F5F1E8;">
-        <p style="margin:0 0 16px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">What Happens Next</p>
-        <p style="margin:0 0 12px; color:#2C2C2C; font-size:15px; line-height:1.7;"><strong>1. Processing.</strong> Your order is being prepared with care.</p>
-        <p style="margin:0 0 12px; color:#2C2C2C; font-size:15px; line-height:1.7;"><strong>2. Shipping.</strong> You'll receive tracking details once your book ships.</p>
-        <p style="margin:0; color:#2C2C2C; font-size:15px; line-height:1.7;"><strong>3. Delivery.</strong> Most orders arrive within 5-7 business days.</p>
-      </td></tr>
-      <tr><td style="padding: 32px 40px; text-align:center;">
-        <p style="margin:0 0 12px; color:#5C5C5C; font-size:14px; line-height:1.6;">Questions about your order? We're here to help.</p>
-        <a href="mailto:collab@mikesignorelli.com" style="color:#C9A961; font-size:15px; font-weight:600; text-decoration:none; border-bottom:1px solid #C9A961;">collab@mikesignorelli.com</a>
-      </td></tr>
-      <tr><td style="background-color:#3D4A2A; padding: 24px 40px; text-align:center;">
-        <p style="margin:0; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px;">&copy; Mike Signorelli Ministries</p>
-        <p style="margin:8px 0 0; color:#C9A961; font-size:11px;">You're receiving this email because you placed an order at mikesignorelli.com</p>
-      </td></tr>
-    </table>
-  </td></tr></table>
-</body></html>`;
-
-  const adminTpl = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>New Order Received - Inherit Your Freedom</title></head>
-<body style="margin:0; padding:0; background-color:#F5F1E8; font-family: Georgia, 'Times New Roman', serif; color:#2C2C2C;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#F5F1E8; padding: 40px 20px;"><tr><td align="center">
-    <table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px; background-color:#FFFFFF; border:1px solid #E5DFD0; border-radius:4px; overflow:hidden;">
-      <tr><td style="background-color:#3D4A2A; padding: 28px 40px;"><table width="100%"><tr>
-        <td style="color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:13px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Admin Notification</td>
-        <td align="right" style="color:#C9A961; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Inherit Your Freedom</td>
-      </tr></table></td></tr>
-      <tr><td style="padding: 40px 40px 16px;">
-        <p style="margin:0 0 8px; color:#C9A961; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase;">New Order Received</p>
-        <h2 style="margin:0 0 8px; color:#2C2C2C; font-size:28px; font-weight:400; line-height:1.3;">Order #{{order_number}}</h2>
-        <p style="margin:0; color:#5C5C5C; font-size:14px;">Placed {{order_date}} &middot; {{order_time}}</p>
-      </td></tr>
-      <tr><td style="padding: 16px 40px 24px;"><table cellpadding="0" cellspacing="0"><tr>
-        <td style="background-color:#E8F0DC; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 8px 14px; border-radius:20px;">Payment: paid</td>
-        <td style="width:8px;"></td>
-        <td style="background-color:#FAF3DD; color:#8A6914; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 8px 14px; border-radius:20px;">Fulfillment: Pending</td>
-      </tr></table></td></tr>
-      <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Customer</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF5; border:1px solid #E5DFD0; border-radius:4px;"><tr><td style="padding: 16px 20px;">
-          <p style="margin:0 0 4px; color:#2C2C2C; font-size:16px; font-weight:600;">{{customer_name}}</p>
-          <p style="margin:0 0 2px; color:#5C5C5C; font-size:14px;"><a href="mailto:{{customer_email}}" style="color:#3D4A2A; text-decoration:none;">{{customer_email}}</a></p>
-          <p style="margin:0; color:#5C5C5C; font-size:14px;">{{customer_phone}}</p>
-        </td></tr></table>
-      </td></tr>
-      <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Shipping Address</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF5; border:1px solid #E5DFD0; border-radius:4px;"><tr><td style="padding: 16px 20px; color:#2C2C2C; font-size:14px; line-height:1.7;">
-          {{shipping_street}}<br />{{shipping_city}}, {{shipping_state}} {{shipping_zip}}<br />{{shipping_country}}
-        </td></tr></table>
-      </td></tr>
-      <tr><td style="padding: 0 40px 24px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Order Details</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E5DFD0; border-radius:4px;">
-          <tr style="background-color:#3D4A2A;">
-            <td style="padding:10px 16px; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Item</td>
-            <td align="center" style="padding:10px 16px; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Qty</td>
-            <td align="right" style="padding:10px 16px; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px; text-transform:uppercase;">Price</td>
-          </tr>
-          <tr><td style="padding:14px 16px; color:#2C2C2C; font-size:15px; border-bottom:1px solid #E5DFD0;">Inherit Your Freedom</td>
-            <td align="center" style="padding:14px 16px; color:#2C2C2C; font-size:15px; border-bottom:1px solid #E5DFD0;">{{quantity}}</td>
-            <td align="right" style="padding:14px 16px; color:#2C2C2C; font-size:15px; border-bottom:1px solid #E5DFD0;">\${{unit_price}}</td></tr>
-          <tr><td colspan="2" style="padding:10px 16px; color:#5C5C5C; font-size:13px;">Subtotal</td><td align="right" style="padding:10px 16px; color:#2C2C2C; font-size:14px;">\${{subtotal}}</td></tr>
-          <tr><td colspan="2" style="padding:6px 16px; color:#5C5C5C; font-size:13px;">Shipping</td><td align="right" style="padding:6px 16px; color:#2C2C2C; font-size:14px;">\${{shipping}}</td></tr>
-          <tr style="background-color:#FAFAF5;"><td colspan="2" style="padding:14px 16px; color:#2C2C2C; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; border-top:1px solid #E5DFD0;">Total</td>
-            <td align="right" style="padding:14px 16px; color:#3D4A2A; font-size:20px; font-weight:600; border-top:1px solid #E5DFD0;">\${{total}}</td></tr>
-        </table>
-      </td></tr>
-      <tr><td style="padding: 0 40px 32px;">
-        <p style="margin:0 0 12px; color:#3D4A2A; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:3px; text-transform:uppercase; font-weight:600;">Payment</p>
-        <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#FAFAF5; border:1px solid #E5DFD0; border-radius:4px;"><tr><td style="padding: 14px 20px; font-size:14px; color:#2C2C2C;">
-          <table width="100%">
-            <tr><td style="color:#5C5C5C;">Method</td><td align="right">{{payment_method}}</td></tr>
-            <tr><td style="color:#5C5C5C; padding-top:6px;">Stripe Session</td><td align="right" style="padding-top:6px; font-family:'SF Mono', Menlo, monospace; font-size:12px;">{{stripe_session_id}}</td></tr>
-            <tr><td style="color:#5C5C5C; padding-top:6px;">Amount Paid</td><td align="right" style="padding-top:6px; color:#3D4A2A; font-weight:600;">\${{total}} {{currency}}</td></tr>
-          </table>
-        </td></tr></table>
-      </td></tr>
-      <tr><td align="center" style="padding: 0 40px 40px;">
-        <a href="{{stripe_dashboard_url}}" style="display:inline-block; background-color:#3D4A2A; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:12px; letter-spacing:2px; text-transform:uppercase; font-weight:600; padding: 14px 28px; text-decoration:none; border-radius:2px;">View in Stripe Dashboard</a>
-      </td></tr>
-      <tr><td style="background-color:#3D4A2A; padding: 20px 40px; text-align:center;">
-        <p style="margin:0; color:#F5F1E8; font-family:'Helvetica Neue', Arial, sans-serif; font-size:11px; letter-spacing:2px;">Action required: Process and ship this order.</p>
-      </td></tr>
-    </table>
-  </td></tr></table>
-</body></html>`;
-
-  const sendEmail = async (to: string, subject: string, html: string) => {
-    const r = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: FROM, to: [to], subject, html }),
-    });
-    const text = await r.text();
-    if (!r.ok) console.error(`stripe-webhook: Resend error to ${to}`, r.status, text);
-    return r.ok;
-  };
-
-  let customerOk = false;
-  if (email) {
-    customerOk = await sendEmail(email, "Your Inherit Your Freedom Order Confirmation", render(customerTpl));
-  } else {
-    console.warn("stripe-webhook: no customer email on session, skipping customer confirmation");
-  }
-  const adminOk = await sendEmail(
-    ADMIN_EMAIL,
-    `New Order #${orderNumber} - ${fullName} (${quantity}x Inherit Your Freedom)`,
-    render(adminTpl),
-  );
-
-  if (customerOk && adminOk) return "Sent";
-  if (customerOk || adminOk) return "Partial";
-  return "Failed";
 }
 
 Deno.serve(async (req) => {
@@ -223,15 +51,19 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405, headers: corsHeaders });
   }
 
-  const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
-  const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
-  const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-  if (!stripeKey || !webhookSecret) {
-    console.error("stripe-webhook: STRIPE_SECRET_KEY/STRIPE_WEBHOOK_SECRET not configured");
+  let config;
+  let webhookSecret: string;
+  try {
+    config = getStripeConfig();
+    webhookSecret = getWebhookSecret(config.mode);
+  } catch (err) {
+    console.error("stripe-webhook: Stripe config error", (err as Error).message);
     return new Response("Webhook not configured", { status: 500, headers: corsHeaders });
   }
+  const { stripe, mode, priceId } = config;
+
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   if (!supabaseUrl || !serviceKey) {
     console.error("stripe-webhook: SUPABASE_URL/SERVICE_ROLE_KEY missing");
     return new Response("Database not configured", { status: 500, headers: corsHeaders });
@@ -243,23 +75,23 @@ Deno.serve(async (req) => {
   }
 
   const rawBody = await req.text();
-  const stripe = new Stripe(stripeKey, { apiVersion: "2024-11-20.acacia" });
 
   let event: Stripe.Event;
   try {
+    // Only the current mode's webhook secret is tried - a TEST event will
+    // never verify while STRIPE_MODE=live, and vice versa.
     event = await stripe.webhooks.constructEventAsync(rawBody, signature, webhookSecret);
   } catch (err) {
     console.error("stripe-webhook: signature verification failed", (err as Error).message);
     return new Response("Webhook signature verification failed", { status: 400, headers: corsHeaders });
   }
 
-  // Belt-and-suspenders: once this deployment is declared live, a test-mode
-  // event should never be acted on even if it somehow reaches this endpoint
-  // (e.g. the same URL registered for both test and live webhooks).
-  const stripeMode = Deno.env.get("STRIPE_MODE");
-  if (stripeMode === "live" && event.livemode === false) {
-    console.log("stripe-webhook: ignoring test-mode event while STRIPE_MODE=live", event.id, event.type);
-    return new Response(JSON.stringify({ received: true, ignored: "test-mode event" }), {
+  // Belt-and-suspenders: an event whose livemode doesn't match our current
+  // mode should never be acted on, even if it somehow verified (e.g. the
+  // same URL briefly shared between a test and a live endpoint).
+  if (event.livemode !== (mode === "live")) {
+    console.log(`stripe-webhook: ignoring event.livemode=${event.livemode} while STRIPE_MODE=${mode}`, event.id, event.type);
+    return new Response(JSON.stringify({ received: true, ignored: "mode mismatch" }), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
@@ -267,12 +99,89 @@ Deno.serve(async (req) => {
 
   const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
+  // Sends the customer confirmation + admin notification for a paid order.
+  // Idempotency: an atomic `email_sent=false -> true` update acts as the
+  // send lock, so two concurrent/redelivered webhook events for the same
+  // session can't both send. A failed send still leaves email_sent=true
+  // (the slot was claimed) with the error recorded in orders.email_error -
+  // resend-order-email is the explicit, manual way to retry it.
+  async function sendOrderEmails(orderId: string, session: Stripe.Checkout.Session): Promise<string> {
+    const m = session.metadata ?? {};
+    const customerName = `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim() || "Friend";
+    const data = buildEmailData(session, customerName);
+
+    const { data: claimed, error: claimErr } = await admin
+      .from("orders")
+      .update({ email_sent: true, email_sent_at: new Date().toISOString() })
+      .eq("id", orderId)
+      .eq("email_sent", false)
+      .select()
+      .maybeSingle();
+
+    if (claimErr) {
+      console.error("stripe-webhook: email claim update failed", claimErr);
+      return "Failed";
+    }
+    if (!claimed) {
+      console.log("stripe-webhook: email already sent for this order, skipping", orderId);
+      return "Already Sent";
+    }
+
+    let customerResult = { success: false, error: "No customer email on session" };
+    if (data.customerEmail) {
+      customerResult = await sendEmail({
+        to: data.customerEmail,
+        subject: "Your order is confirmed - Inherit Your Freedom",
+        html: renderCustomerEmailHtml(data),
+        text: renderCustomerEmailText(data),
+      });
+    } else {
+      console.warn("stripe-webhook: no customer email on session, skipping customer confirmation", orderId);
+    }
+
+    const adminEmail = Deno.env.get("ADMIN_EMAIL") || SUPPORT_EMAIL;
+    const adminResult = await sendEmail({
+      to: adminEmail,
+      subject: `New Order #${session.id.slice(-12).toUpperCase()} - ${customerName} (${data.quantity}x Inherit Your Freedom)`,
+      html: renderAdminEmailHtml(data),
+      text: renderAdminEmailText(data),
+    });
+
+    await Promise.all([
+      admin.from("email_logs").insert({
+        order_id: orderId,
+        to_email: data.customerEmail || "(none)",
+        type: "customer_confirmation",
+        status: customerResult.success ? "sent" : "failed",
+        error: customerResult.success ? null : customerResult.error,
+      }),
+      admin.from("email_logs").insert({
+        order_id: orderId,
+        to_email: adminEmail,
+        type: "admin_notification",
+        status: adminResult.success ? "sent" : "failed",
+        error: adminResult.success ? null : adminResult.error,
+      }),
+    ]);
+
+    if (!customerResult.success || !adminResult.success) {
+      const combinedError = [
+        !customerResult.success ? `customer: ${customerResult.error}` : null,
+        !adminResult.success ? `admin: ${adminResult.error}` : null,
+      ].filter(Boolean).join("; ");
+      await admin.from("orders").update({ email_error: combinedError }).eq("id", orderId);
+      console.error("stripe-webhook: order confirmation email(s) failed", orderId, combinedError);
+      return customerResult.success || adminResult.success ? "Partial" : "Failed";
+    }
+
+    return "Sent";
+  }
+
   // Fire-and-forget: log a PAID order to the "inherit your freedom order to
-  // google sheet" Zap. Only called for confirmed payments - no pending/failed
-  // rows. Field names must match that Zap's Google Sheets step mapping
-  // (first_name, email_address, zip_code, etc). email_status is sent under
-  // three key spellings since the Zap's Catch Hook step matches on the exact
-  // key it first saw and we don't know which casing it was set up with.
+  // google sheet" Zap. Field names must match that Zap's Google Sheets step
+  // mapping (first_name, email_address, zip_code, etc). email_status is sent
+  // under three key spellings since the Zap's Catch Hook step matches on the
+  // exact key it first saw and we don't know which casing it was set up with.
   const zapierOrderUrl = Deno.env.get("ZAPIER_ORDER_WEBHOOK_URL");
   function notifyZapierOrderPaid(session: Stripe.Checkout.Session, emailStatus: string) {
     if (!zapierOrderUrl) {
@@ -331,25 +240,26 @@ Deno.serve(async (req) => {
         const paymentIntent = typeof session.payment_intent === "string"
           ? session.payment_intent
           : session.payment_intent?.id ?? null;
+        const m = session.metadata ?? {};
+        const customerName = `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim() || null;
 
-        // Idempotency guard: Stripe can redeliver the same event. Only send
-        // emails/Zapier the first time this session is marked paid.
         const { data: existing } = await admin
           .from("orders")
-          .select("status")
+          .select("id, status")
           .eq("stripe_session_id", session.id)
           .maybeSingle();
         const alreadyPaid = existing?.status === "paid";
 
-        const { error } = await admin
+        const { data: upserted, error } = await admin
           .from("orders")
           .upsert(
             {
               stripe_session_id: session.id,
               stripe_payment_intent: paymentIntent,
-              price_id: session.metadata?.price_id || Deno.env.get("STRIPE_PRICE_ID"),
+              price_id: session.metadata?.price_id || priceId,
               quantity: Number(session.metadata?.quantity ?? 1),
               customer_email: session.customer_email ?? session.customer_details?.email ?? null,
+              customer_name: customerName,
               amount_total: session.amount_total,
               currency: session.currency,
               status: "paid",
@@ -357,14 +267,23 @@ Deno.serve(async (req) => {
               updated_at: new Date().toISOString(),
             },
             { onConflict: "stripe_session_id" },
-          );
+          )
+          .select("id")
+          .maybeSingle();
         if (error) console.error("stripe-webhook: upsert (paid) failed", error);
 
+        const orderId = upserted?.id ?? existing?.id;
+        let emailStatus = "Failed";
+        if (orderId) {
+          emailStatus = await sendOrderEmails(orderId, session);
+        } else {
+          console.error("stripe-webhook: could not resolve order id, skipping emails", session.id);
+        }
+
         if (!alreadyPaid) {
-          const emailStatus = await sendOrderEmails(session);
           notifyZapierOrderPaid(session, emailStatus);
         } else {
-          console.log("stripe-webhook: session already marked paid, skipping duplicate emails/Zapier", session.id);
+          console.log("stripe-webhook: session already marked paid, skipping duplicate Zapier notify", session.id);
         }
         break;
       }
@@ -387,8 +306,8 @@ Deno.serve(async (req) => {
     }
   } catch (err) {
     console.error("stripe-webhook: handler error", err);
-    // Still return 200: Stripe retries on non-2xx, and a DB hiccup here
-    // shouldn't cause repeated retries for an event we've already seen.
+    // Still return 200: Stripe retries on non-2xx, and a DB/email hiccup
+    // here shouldn't cause repeated retries for an event we've already seen.
   }
 
   return new Response(JSON.stringify({ received: true }), {
