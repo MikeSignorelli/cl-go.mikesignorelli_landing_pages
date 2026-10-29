@@ -15,7 +15,8 @@ const corsHeaders = {
 // Where the admin copy of each order goes. Recipients need no verification.
 const ADMIN_EMAIL = Deno.env.get("ORDER_ADMIN_EMAIL") ?? "support@mikesignorelli.com";
 
-/** Renders the customer order-confirmation + admin new-order emails via Resend. Returns
+/** Renders the customer order-confirmation + admin new-order emails and sends them
+ * over SMTP. Returns
  * "Sent" | "Partial" | "Failed" | "Skipped (no email service)" for the Zapier/Sheet row. */
 async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string> {
   // Sent over SMTP through our own mailbox rather than a third-party email API.
