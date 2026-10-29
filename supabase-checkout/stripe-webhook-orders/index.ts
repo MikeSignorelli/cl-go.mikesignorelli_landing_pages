@@ -12,8 +12,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-const ADMIN_EMAIL = "support@mikesignorelli.com";
-const FROM = "Mike Signorelli <orders@mikesignorelli.com>";
+// Where the admin copy of each order goes. Recipients need no verification.
+const ADMIN_EMAIL = Deno.env.get("ORDER_ADMIN_EMAIL") ?? "support@mikesignorelli.com";
 
 /** Renders the customer order-confirmation + admin new-order emails via Resend. Returns
  * "Sent" | "Partial" | "Failed" | "Skipped (no email service)" for the Zapier/Sheet row. */
@@ -214,6 +214,13 @@ async function sendOrderEmails(session: Stripe.Checkout.Session): Promise<string
     </table>
   </td></tr></table>
 </body></html>`;
+
+  // Gmail rewrites the From header to the authenticated mailbox unless the
+  // address is a verified "Send mail as" alias on that account, so defaulting to
+  // the SMTP user is the one value that can never be rewritten. Set SMTP_FROM to
+  // something friendlier (e.g. "Mike Signorelli <orders@mikesignorelli.com>")
+  // only once that address is verified on the sending account.
+  const FROM = Deno.env.get("SMTP_FROM") ?? `Mike Signorelli <${smtpUser}>`;
 
   // One connection for both messages, closed below so a failed send cannot leave
   // the socket open for the rest of the invocation.

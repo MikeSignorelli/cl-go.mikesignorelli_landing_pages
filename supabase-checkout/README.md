@@ -95,5 +95,13 @@ is meant to be cut over.
   of the Supabase organisation and is documented as not for production use, so
   it would refuse to mail a customer.
 
+  The From address defaults to the mailbox in `SMTP_USER`, because Gmail
+  rewrites any From the authenticated account does not own. Set `SMTP_FROM`
+  (e.g. `Mike Signorelli <orders@mikesignorelli.com>`) only after verifying
+  that address under Gmail → Settings → Accounts → *Send mail as* on the
+  sending account; otherwise the rewrite makes it pointless.
+  `ORDER_ADMIN_EMAIL` overrides where the admin copy goes and needs no
+  verification, since recipients are unrestricted.
+
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are auto-injected by Supabase
 for every edge function — no need to set them manually.
