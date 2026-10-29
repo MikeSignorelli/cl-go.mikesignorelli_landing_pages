@@ -107,9 +107,15 @@ export const PAGE_META: Record<string, PageMeta> = {
     image: OG.freedom,
     noIndex: true,
   },
-  "/inherit-your-freedom/thank-you": {
+  "/inherit-your-freedom/success": {
     title: `Order Confirmed${TITLE_SUFFIX}`,
     description: "Your order is confirmed.",
+    image: OG.freedom,
+    noIndex: true,
+  },
+  "/inherit-your-freedom/cancel": {
+    title: `Checkout Cancelled${TITLE_SUFFIX}`,
+    description: "Your checkout was cancelled and you have not been charged.",
     image: OG.freedom,
     noIndex: true,
   },

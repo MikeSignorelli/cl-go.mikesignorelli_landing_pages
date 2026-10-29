@@ -3,14 +3,7 @@
 # go.mikesignorelli.com project, which also hosts submit-lead.
 project_id = "gprrntuvxyzyjbwgqwce"
 
-[functions.create-checkout]
-verify_jwt = false
 
-[functions.notify-order]
-verify_jwt = false
-
-[functions.stripe-webhook]
-verify_jwt = false
 
 [functions.send-bonus-sample]
 verify_jwt = false

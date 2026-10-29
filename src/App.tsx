@@ -20,7 +20,6 @@ import AdminDashboard from "./pages/AdminDashboard.tsx";
 import InheritYourFreedom from "./pages/InheritYourFreedom.tsx";
 import InheritYourFreedomShop from "./pages/InheritYourFreedomShop.tsx";
 import InheritYourFreedomCheckout from "./pages/InheritYourFreedomCheckout.tsx";
-import InheritYourFreedomThankYou from "./pages/InheritYourFreedomThankYou.tsx";
 import InheritYourFreedomSuccess from "./pages/InheritYourFreedomSuccess.tsx";
 import InheritYourFreedomCancel from "./pages/InheritYourFreedomCancel.tsx";
 import ChurchSystemsStarterKit from "./pages/ChurchSystemsStarterKit.tsx";
@@ -55,7 +54,13 @@ const App = () => (
           <Route path="/inherit-your-freedom" element={<InheritYourFreedom />} />
           <Route path="/inherit-your-freedom/shop" element={<InheritYourFreedomShop />} />
           <Route path="/inherit-your-freedom/checkout" element={<InheritYourFreedomCheckout />} />
-          <Route path="/inherit-your-freedom/thank-you" element={<InheritYourFreedomThankYou />} />
+          {/* Retired with the old create-checkout flow. Kept as a redirect so any
+              Stripe session still carrying the old success_url lands somewhere
+              sensible instead of a 404. */}
+          <Route
+            path="/inherit-your-freedom/thank-you"
+            element={<Navigate to="/inherit-your-freedom/success" replace />}
+          />
           <Route path="/inherit-your-freedom/success" element={<InheritYourFreedomSuccess />} />
           <Route path="/inherit-your-freedom/cancel" element={<InheritYourFreedomCancel />} />
           <Route path="/church-systems-starter-kit" element={<ChurchSystemsStarterKit />} />

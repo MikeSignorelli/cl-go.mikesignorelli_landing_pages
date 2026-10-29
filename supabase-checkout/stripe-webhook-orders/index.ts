@@ -80,6 +80,46 @@ function buildEmailData(session: Stripe.Checkout.Session, customerName: string):
   };
 }
 
+/**
+ * Only Inherit Your Freedom checkouts belong to this webhook.
+ *
+ * Every other product on the Stripe account - the Convergence membership, the
+ * Ministry Leader's Stack, the Breakthrough subscriptions - also fires
+ * checkout.session.completed at this same endpoint. In October a Ministry
+ * Leaders subscription sent its buyer an Inherit Your Freedom receipt and bonus
+ * email because nothing checked what had actually been bought.
+ *
+ * create-checkout-session stamps metadata.price_id, so our own sessions
+ * identify themselves. Anything else is verified against Stripe's own line
+ * items before we act on it, so a session we did not create cannot slip
+ * through on metadata alone.
+ */
+async function isIyfOrder(
+  stripe: Stripe,
+  session: Stripe.Checkout.Session,
+  expectedPriceId: string | undefined,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (!expectedPriceId) return { ok: false, reason: "no_price_configured" };
+
+  const stamped = session.metadata?.price_id;
+  if (stamped) {
+    return stamped === expectedPriceId ? { ok: true } : { ok: false, reason: `price_${stamped}` };
+  }
+
+  try {
+    const items = await stripe.checkout.sessions.listLineItems(session.id, { limit: 100 });
+    if (!items.data.length) return { ok: false, reason: "no_line_items" };
+    const foreign = items.data.find((li) => li.price?.id !== expectedPriceId);
+    return foreign
+      ? { ok: false, reason: `line_item_${foreign.price?.id ?? "unknown"}` }
+      : { ok: true };
+  } catch (err) {
+    // Fail closed: a session we cannot verify is not emailed.
+    console.error("stripe-webhook: line item check failed", session.id, err);
+    return { ok: false, reason: "line_item_lookup_failed" };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -271,6 +311,15 @@ Deno.serve(async (req) => {
             session.id,
             session.payment_status,
           );
+          break;
+        }
+
+        // priceId comes from getStripeConfig(), which resolves STRIPE_PRICE_ID_TEST
+        // or _LIVE for the current mode. Reading the plain STRIPE_PRICE_ID here
+        // would compare against a different value and reject every real order.
+        const iyf = await isIyfOrder(stripe, session, priceId);
+        if (!iyf.ok) {
+          console.log("stripe-webhook: ignoring non-IYF session", session.id, iyf.reason);
           break;
         }
 

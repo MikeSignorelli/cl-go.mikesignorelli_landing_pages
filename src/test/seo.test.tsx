@@ -49,11 +49,23 @@ describe("metaForPath", () => {
   });
 
   it("keeps post-conversion and admin pages out of the index", () => {
+    // Listed rather than pattern-matched: the old version keyed off route names
+    // containing "thank-you"/"checkout", which silently stopped covering these
+    // pages when the IYF flow moved to /success and /cancel.
+    const noIndex = new Set([
+      "/greece-turkey-tour-thank-you",
+      "/pastor-systems-audit-thank-you",
+      "/inherit-your-freedom/checkout",
+      "/inherit-your-freedom/success",
+      "/inherit-your-freedom/cancel",
+      "/admin",
+      "/admin/dashboard",
+    ]);
     for (const route of META_ROUTES) {
-      const expected =
-        route.includes("thank-you") || route.startsWith("/admin") || route.includes("checkout");
-      expect(Boolean(PAGE_META[route].noIndex)).toBe(expected);
+      expect(Boolean(PAGE_META[route].noIndex)).toBe(noIndex.has(route));
     }
+    // Every listed route must still exist, so a rename cannot quietly drop one.
+    for (const route of noIndex) expect(META_ROUTES).toContain(route);
   });
 
   it("points og:image at a generated file, never an expiring signed URL", () => {
